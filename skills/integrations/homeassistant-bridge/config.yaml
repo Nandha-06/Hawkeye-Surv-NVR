@@ -1,0 +1,39 @@
+# Home Assistant Bridge Skill — Configuration Schema
+# Parsed by Hawkeye skill-registry-service.cjs → parseConfigYaml()
+
+params:
+  - key: auto_start
+    label: Auto Start
+    type: boolean
+    default: true
+    description: "Start this skill automatically when Hawkeye launches"
+
+  - key: hass_url
+    label: Home Assistant URL
+    type: string
+    default: "http://homeassistant.local:8123"
+    description: "The base URL of your Home Assistant instance"
+
+  - key: access_token
+    label: Long-Lived Access Token
+    type: password
+    default: ""
+    description: "Long-Lived Access Token generated in Home Assistant profile (required for REST API)"
+
+  - key: webhook_id
+    label: Webhook ID
+    type: string
+    default: ""
+    description: "Optional: Home Assistant Webhook ID to post events without an access token"
+
+  - key: trigger_threat_levels
+    label: Trigger Threat Levels
+    type: string
+    default: "warning,critical"
+    description: "Comma-separated VLM threat levels that will trigger Home Assistant events (info, warning, critical)"
+
+  - key: trigger_classes
+    label: Trigger Object Classes
+    type: string
+    default: "person"
+    description: "Comma-separated YOLO detection classes that will trigger Home Assistant events"

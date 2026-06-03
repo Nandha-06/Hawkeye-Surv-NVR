@@ -1,0 +1,423 @@
+{
+  "version": "1.0.0",
+  "repository": "SharpAI/Hawkeye",
+  "updated": "2026-06-02",
+  "description": "AI skill catalog for SharpAI Hawkeye. Each skill is a self-contained folder with a SKILL.md manifest.",
+  "categories": {
+    "detection": "Object detection, person recognition, visual grounding",
+    "analysis": "VLM scene understanding",
+    "camera-providers": "Camera brand integrations \u2014 clip feed, live stream",
+    "streaming": "RTSP/WebRTC live view via go2rtc",
+    "channels": "Messaging platform channels for Clawdbot agent",
+    "automation": "MQTT, webhooks, Home Assistant triggers",
+    "integrations": "Smart home and IoT platform bridges"
+  },
+  "skills": [
+    {
+      "id": "visual-event-analyzer",
+      "name": "Visual Event Analyzer",
+      "description": "Event-driven visual summaries, natural language alerts, and threat policy analysis using visual language models (VLM).",
+      "version": "1.0.0",
+      "category": "analysis",
+      "path": "skills/analysis/visual-event-analyzer",
+      "tags": [
+        "vlm",
+        "event-analysis",
+        "threat-detection",
+        "visual-summary"
+      ],
+      "platforms": [
+        "linux-x64",
+        "linux-arm64",
+        "darwin-arm64",
+        "darwin-x64",
+        "win-x64"
+      ],
+      "requirements": {
+        "python": ">=3.9",
+        "ram_gb": 2
+      },
+      "capabilities": [
+        "live_detection",
+        "threat_analysis"
+      ],
+      "ui_unlocks": [
+        "detection_overlay",
+        "detection_results"
+      ]
+    },
+
+    {
+      "id": "perception-core",
+      "name": "Perception Core",
+      "description": "Unified shared perception pipeline — real-time YOLO object detection with ByteTrack tracking, ROI face detection, face recognition, and hardware backend abstraction.",
+      "version": "3.0.0",
+      "category": "detection",
+      "path": "skills/detection/perception-core",
+      "tags": [
+        "detection",
+        "yolo",
+        "object-detection",
+        "real-time",
+        "coco",
+        "perception",
+        "reid",
+        "face-recognition",
+        "tracking",
+        "bytetrack"
+      ],
+      "platforms": [
+        "linux-x64",
+        "linux-arm64",
+        "darwin-arm64",
+        "darwin-x64",
+        "win-x64"
+      ],
+      "requirements": {
+        "python": ">=3.9",
+        "ram_gb": 2
+      },
+      "capabilities": [
+        "live_detection",
+        "bbox_overlay",
+        "face_recognition",
+        "person_tracking",
+        "threat_analysis"
+      ],
+      "ui_unlocks": [
+        "detection_overlay",
+        "detection_results"
+      ],
+      "fps_presets": [
+        0.2,
+        0.5,
+        1,
+        3,
+        5,
+        15
+      ],
+      "model_sizes": [
+        "nano",
+        "small",
+        "medium",
+        "large"
+      ]
+    },
+    {
+      "id": "rf-detr-detection-segmentation",
+      "name": "RF-DETR Detection + Segmentation",
+      "description": "RF-DETR perception skill using Hugging Face Transformers. Supports object detection, instance segmentation, and combined mask+box output from RF-DETR-Seg.",
+      "version": "1.0.0",
+      "category": "detection",
+      "path": "skills/detection/rf-detr-detection-segmentation",
+      "tags": [
+        "detection",
+        "segmentation",
+        "instance-segmentation",
+        "rf-detr",
+        "transformers",
+        "coco",
+        "roboflow"
+      ],
+      "platforms": [
+        "linux-x64",
+        "linux-arm64",
+        "darwin-arm64",
+        "darwin-x64",
+        "win-x64"
+      ],
+      "requirements": {
+        "python": ">=3.10",
+        "ram_gb": 4
+      },
+      "capabilities": [
+        "live_detection",
+        "bbox_overlay",
+        "instance_segmentation",
+        "mask_overlay"
+      ],
+      "ui_unlocks": [
+        "detection_overlay",
+        "detection_results",
+        "segmentation_overlay"
+      ],
+      "fps_presets": [
+        0.2,
+        0.5,
+        1,
+        3,
+        5
+      ],
+      "model_sizes": {
+        "detection": [
+          "nano",
+          "small",
+          "medium",
+          "large",
+          "base",
+          "base2"
+        ],
+        "segmentation": [
+          "preview",
+          "nano",
+          "small",
+          "medium",
+          "large",
+          "xlarge",
+          "xxlarge",
+          "segmentation"
+        ]
+      }
+    },
+    {
+      "id": "camera-claw",
+      "name": "Camera Claw",
+      "description": "Security camera for your AI agent — sandbox, record, and monitor OpenClaw activity.",
+      "version": "2026.3.12",
+      "category": "integrations",
+      "url": "https://github.com/SharpAI/CameraClaw",
+      "repo_url": "https://github.com/SharpAI/CameraClaw",
+      "code_structure": [
+        {
+          "path": "SKILL.md",
+          "desc": "Hawkeye skill manifest (11 params)"
+        },
+        {
+          "path": "package.json",
+          "desc": "Node.js dependencies"
+        },
+        {
+          "path": "config.yaml",
+          "desc": "Default params"
+        },
+        {
+          "path": "deploy.sh",
+          "desc": "Node.js + Docker bootstrapper"
+        },
+        {
+          "path": "deploy.bat",
+          "desc": "Windows bootstrapper"
+        },
+        {
+          "path": "scripts/monitor.js",
+          "desc": "Main entry — Docker orchestrator + JSONL protocol"
+        },
+        {
+          "path": "scripts/health-check.js",
+          "desc": "Container health checker"
+        },
+        {
+          "path": "docs/hawkeye_openclaw_note.md",
+          "desc": "Hawkeye integration requirements"
+        }
+      ],
+      "tags": [
+        "security",
+        "sandbox",
+        "monitoring",
+        "openclaw",
+        "ai-agent"
+      ],
+      "platforms": [
+        "linux-x64",
+        "linux-arm64",
+        "darwin-arm64",
+        "darwin-x64",
+        "win-x64"
+      ],
+      "requirements": {
+        "docker": true
+      },
+      "capabilities": [
+        "monitoring",
+        "recording"
+      ]
+    },
+
+
+    {
+      "id": "homeassistant-bridge",
+      "name": "Home Assistant Bridge",
+      "description": "Pluggable bridge connecting your SharpAI Hawkeye security platform with Home Assistant. Forwards detections and threat alerts.",
+      "version": "1.0.0",
+      "category": "integrations",
+      "path": "skills/integrations/homeassistant-bridge",
+      "tags": [
+        "home-assistant",
+        "integration",
+        "webhook",
+        "automation",
+        "bridge"
+      ],
+      "platforms": [
+        "linux-x64",
+        "linux-arm64",
+        "darwin-arm64",
+        "darwin-x64",
+        "win-x64"
+      ],
+      "requirements": {
+        "python": ">=3.9",
+        "ram_gb": 1
+      },
+      "capabilities": [
+        "event_forwarding"
+      ]
+    },
+
+    {
+      "id": "channel-line",
+      "name": "LINE Channel",
+      "description": "LINE messaging channel for Clawdbot agent — receive alerts and control cameras via LINE Messenger.",
+      "version": "1.0.0",
+      "category": "channels",
+      "path": "skills/channels/line",
+      "tags": ["messenger", "line", "notification", "bot"],
+      "platforms": ["linux-x64", "linux-arm64", "darwin-arm64", "darwin-x64", "win-x64"],
+      "requirements": {
+        "python": ">=3.9"
+      },
+      "capabilities": ["messaging_channel"]
+    },
+    {
+      "id": "channel-matrix",
+      "name": "Matrix Channel",
+      "description": "Matrix/Element messaging channel for Clawdbot agent — full conversation bot interface in Element.",
+      "version": "1.0.0",
+      "category": "channels",
+      "path": "skills/channels/matrix",
+      "tags": ["matrix", "element", "chat", "bot"],
+      "platforms": ["linux-x64", "linux-arm64", "darwin-arm64", "darwin-x64", "win-x64"],
+      "requirements": {
+        "python": ">=3.9"
+      },
+      "capabilities": ["messaging_channel"]
+    },
+    {
+      "id": "channel-signal",
+      "name": "Signal Channel",
+      "description": "Signal messaging channel for Clawdbot agent — send secure notifications and search clips privately.",
+      "version": "1.0.0",
+      "category": "channels",
+      "path": "skills/channels/signal",
+      "tags": ["signal", "secure", "chat", "bot"],
+      "platforms": ["linux-x64", "linux-arm64", "darwin-arm64", "darwin-x64", "win-x64"],
+      "requirements": {
+        "python": ">=3.9"
+      },
+      "capabilities": ["messaging_channel"]
+    },
+    {
+      "id": "channel-telegram",
+      "name": "Telegram Channel",
+      "description": "Telegram messaging channel for Clawdbot agent — receive alerts and control cameras via a Telegram bot.",
+      "version": "1.0.0",
+      "category": "channels",
+      "path": "skills/channels/telegram",
+      "tags": ["telegram", "chat", "bot", "notification"],
+      "platforms": ["linux-x64", "linux-arm64", "darwin-arm64", "darwin-x64", "win-x64"],
+      "requirements": {
+        "python": ">=3.9"
+      },
+      "capabilities": ["messaging_channel"]
+    },
+    {
+      "id": "camera-provider-eufy",
+      "name": "Eufy Camera Provider",
+      "description": "Eufy camera integration — local RTSP streaming and event-triggered clip retrieval.",
+      "version": "1.0.0",
+      "category": "camera-providers",
+      "path": "skills/camera-providers/eufy",
+      "tags": ["camera", "eufy", "rtsp", "streaming"],
+      "platforms": ["linux-x64", "linux-arm64", "darwin-arm64", "darwin-x64", "win-x64"],
+      "requirements": {
+        "python": ">=3.9"
+      },
+      "capabilities": ["clip_feed", "discover_cameras", "live_stream"]
+    },
+    {
+      "id": "camera-provider-reolink",
+      "name": "Reolink Camera Provider",
+      "description": "Reolink camera integration — high performance RTSP stream and snapshot API support.",
+      "version": "1.0.0",
+      "category": "camera-providers",
+      "path": "skills/camera-providers/reolink",
+      "tags": ["camera", "reolink", "rtsp", "snapshot"],
+      "platforms": ["linux-x64", "linux-arm64", "darwin-arm64", "darwin-x64", "win-x64"],
+      "requirements": {
+        "python": ">=3.9"
+      },
+      "capabilities": ["clip_feed", "discover_cameras", "live_stream", "snapshot"]
+    },
+    {
+      "id": "camera-provider-tapo",
+      "name": "Tapo Camera Provider",
+      "description": "TP-Link Tapo camera integration — RTSP streaming and ONVIF device discovery.",
+      "version": "1.0.0",
+      "category": "camera-providers",
+      "path": "skills/camera-providers/tapo",
+      "tags": ["camera", "tapo", "rtsp", "onvif"],
+      "platforms": ["linux-x64", "linux-arm64", "darwin-arm64", "darwin-x64", "win-x64"],
+      "requirements": {
+        "python": ">=3.9"
+      },
+      "capabilities": ["clip_feed", "discover_cameras", "live_stream"]
+    },
+    {
+      "id": "ha-automation-trigger",
+      "name": "HA Automation Trigger",
+      "description": "Fires hawkeye_detection events in Home Assistant to run smart automations.",
+      "version": "1.0.0",
+      "category": "automation",
+      "path": "skills/automation/ha-trigger",
+      "tags": ["home-assistant", "automation", "trigger", "event"],
+      "platforms": ["linux-x64", "linux-arm64", "darwin-arm64", "darwin-x64", "win-x64"],
+      "requirements": {
+        "python": ">=3.9"
+      },
+      "capabilities": ["automation"]
+    },
+    {
+      "id": "mqtt-automation",
+      "name": "MQTT Automation",
+      "description": "Publish Hawkeye person, clip, and alert events to your local MQTT broker.",
+      "version": "1.0.0",
+      "category": "automation",
+      "path": "skills/automation/mqtt",
+      "tags": ["mqtt", "automation", "pubsub", "iot"],
+      "platforms": ["linux-x64", "linux-arm64", "darwin-arm64", "darwin-x64", "win-x64"],
+      "requirements": {
+        "python": ">=3.9"
+      },
+      "capabilities": ["automation"]
+    },
+    {
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "description": "Send POST requests with JSON event data to webhooks (IFTTT, Zapier, custom scripts).",
+      "version": "1.0.0",
+      "category": "automation",
+      "path": "skills/automation/webhook",
+      "tags": ["webhook", "http", "automation", "api"],
+      "platforms": ["linux-x64", "linux-arm64", "darwin-arm64", "darwin-x64", "win-x64"],
+      "requirements": {
+        "python": ">=3.9"
+      },
+      "capabilities": ["automation"]
+    },
+    {
+      "id": "go2rtc-cameras",
+      "name": "go2rtc Multi-Streaming",
+      "description": "Registers RTSP camera streams with go2rtc for low-latency WebRTC live views in browser.",
+      "version": "1.0.0",
+      "category": "streaming",
+      "path": "skills/streaming/go2rtc-cameras",
+      "tags": ["streaming", "webrtc", "rtsp", "go2rtc"],
+      "platforms": ["linux-x64", "linux-arm64", "darwin-arm64", "darwin-x64", "win-x64"],
+      "requirements": {
+        "python": ">=3.9"
+      },
+      "capabilities": ["live_stream"]
+    }
+  ]
+}

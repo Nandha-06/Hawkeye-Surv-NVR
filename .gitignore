@@ -1,0 +1,80 @@
+# Generated data and recordings
+.data/
+**/.data/
+recordings/
+**/recordings/
+snapshots/
+**/snapshots/
+__snapshots__/
+
+# Images
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.webp
+*.bmp
+*.tiff
+
+# Videos
+*.webm
+*.mp4
+*.mov
+*.mkv
+*.avi
+*.wav
+*.mp3
+*.m4a
+*.flv
+*.m4s
+# Note: MPEG-TS video segments (.ts files) are NOT globally ignored anymore
+# because the pattern collided with TypeScript source files. Recording
+# directories below (.data/, recordings/, .temp/) already exclude them by path.
+
+# Large model and binary artifacts
+*.pt
+*.pth
+*.onnx
+*.tflite
+*.ckpt
+*.safetensors
+*.bin
+
+# Test snapshots
+*.snap
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env/
+.env
+
+# Local build and workspace caches
+.cache/
+**/.cache/
+.eslintcache
+.agents/
+.antigravitycli/
+.temp/
+.vite/
+node_modules/
+dist/
+build/
+.svelte-kit/
+.output/
+.vercel/
+.netlify/
+.wrangler/
+
+# Python caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# OS artifacts
+.DS_Store
+Thumbs.db

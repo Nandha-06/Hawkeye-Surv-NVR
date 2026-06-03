@@ -1,0 +1,144 @@
+# YOLO 2026 Detection Skill — Configuration Schema
+# Parsed by Hawkeye skill-registry-service.cjs → parseConfigYaml()
+# Format: params[] with key, type, label, default, description, options
+
+params:
+  - key: auto_start
+    label: Auto Start
+    type: boolean
+    default: true
+    description: "Start this skill automatically when Hawkeye launches"
+
+  - key: model_size
+    label: Model Size
+    type: select
+    default: nano
+    description: "YOLO26 model variant — larger = more accurate but slower"
+    options:
+      - { value: nano, label: "Nano (fastest, ~2ms)" }
+      - { value: small, label: "Small (balanced, ~5ms)" }
+      - { value: medium, label: "Medium (accurate, ~12ms)" }
+      - { value: large, label: "Large (most accurate, ~25ms)" }
+
+  - key: confidence
+    label: Confidence Threshold
+    type: number
+    default: 0.8
+    description: "Minimum detection confidence (0.1–1.0)"
+
+  - key: fps
+    label: Frame Rate
+    type: select
+    default: 5
+    description: "Detection processing rate — higher = more CPU/GPU usage"
+    options:
+      - { value: 0.2, label: "Ultra Low (0.2 FPS)" }
+      - { value: 0.5, label: "Low (0.5 FPS)" }
+      - { value: 1, label: "Normal (1 FPS)" }
+      - { value: 3, label: "Active (3 FPS)" }
+      - { value: 5, label: "High (5 FPS)" }
+      - { value: 15, label: "Real-time (15 FPS)" }
+
+  - key: classes
+    label: Detection Classes
+    type: string
+    default: "person,car,dog,cat"
+    description: "Comma-separated COCO class names to detect"
+
+  - key: device
+    label: Inference Device
+    type: select
+    default: auto
+    description: "Compute backend for inference"
+    options:
+      - { value: auto, label: "Auto-detect" }
+      - { value: cpu, label: "CPU" }
+      - { value: cuda, label: "NVIDIA CUDA" }
+      - { value: mps, label: "Apple Silicon (MPS)" }
+      - { value: rocm, label: "AMD ROCm" }
+
+  - key: use_optimized
+    label: Hardware Acceleration
+    type: boolean
+    default: true
+    description: "Auto-convert model to optimized format (TensorRT/CoreML/OpenVINO/ONNX) for faster inference"
+  - key: enable_face_recognition
+    label: Face Recognition
+    type: boolean
+    default: false
+    description: "Enable face detection (SCRFD) + recognition (MobileFaceNet)"
+
+  - key: face_reid_threshold
+    label: Face Recognition Threshold
+    type: number
+    default: 0.60
+    min: 0.1
+    max: 0.99
+    description: "Cosine similarity threshold for face matching. Lower = more lenient."
+
+  - key: reid_every_n
+    label: Re-ID Interval (frames)
+    type: number
+    default: 5
+    min: 1
+    max: 30
+    description: "Run re-ID every N frames per tracked person"
+
+  - key: min_person_width
+    label: Min Person Width (px)
+    type: number
+    default: 80
+    min: 20
+    max: 400
+    description: "Skip re-ID for persons smaller than this width"
+
+  - key: enable_motion_gating
+    label: Enable Motion Gating
+    type: boolean
+    default: false
+    description: "Enable OpenCV frame-differencing on CPU to skip ML inference on static scenes"
+
+  - key: motion_threshold
+    label: Motion Threshold
+    type: number
+    default: 15
+    min: 1
+    max: 255
+    description: "Pixel intensity change threshold for motion (1-255). Lower = more sensitive."
+
+  - key: min_motion_area
+    label: Min Motion Area (px)
+    type: number
+    default: 500
+    min: 10
+    max: 50000
+    description: "Minimum contour area size in pixels to classify as motion."
+
+  - key: enable_vlm_threat_analysis
+    label: Enable VLM Threat Analysis
+    type: boolean
+    default: false
+    description: "Query a VLM in the background when trigger classes are detected"
+    group: VLM Analysis
+
+  - key: vlm_trigger_classes
+    label: VLM Trigger Classes
+    type: string
+    default: "person,car,backpack,handbag"
+    description: "Comma-separated YOLO classes that will trigger VLM threat analysis"
+    group: VLM Analysis
+
+  - key: vlm_cooldown
+    label: VLM Cooldown (seconds)
+    type: number
+    default: 10
+    description: "Minimum time to wait between consecutive VLM queries to rate-limit calls"
+    group: VLM Analysis
+
+  - key: vlm_prompt
+    label: VLM Threat Prompt
+    type: string
+    default: "You are a professional home security AI assistant. Analyze this camera frame. YOLO detected the following objects: {objects}. Perform threat assessment. Identify any security concerns (accidents, fire, smoke, weapon, theft, break-in, intrusion, or suspicious activity). Determine the threat level: 'critical' (immediate danger like fire, weapons, break-in in progress), 'warning' (suspicious activity, open doors/windows, property damage, accidents), or 'info' (normal activity, people passing by, animals). Respond with ONLY a JSON object in this format:\n{\n  \"threat_level\": \"info\" | \"warning\" | \"critical\",\n  \"description\": \"Short explanation of what you see and why you classified it this way.\"\n}"
+    description: "The prompt sent to the VLM. The {objects} token will be replaced dynamically."
+    group: VLM Analysis
+

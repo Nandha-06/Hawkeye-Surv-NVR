@@ -1,0 +1,179 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 98%;
+    --card: 240 10% 5.9%;
+    --card-foreground: 0 0% 98%;
+    --popover: 240 10% 3.9%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 240 5.9% 90%;
+    --primary-foreground: 240 5.9% 10%;
+    --secondary: 240 3.7% 15.9%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 240 3.7% 12%;
+    --muted-foreground: 240 5% 64.9%;
+    --accent: 240 3.7% 15.9%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 3.7% 15.9%;
+    --input: 240 3.7% 15.9%;
+    --ring: 240 4.9% 83.9%;
+    --radius: 0.5rem;
+  }
+
+  * {
+    border-color: hsl(var(--border));
+  }
+
+  body {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    font-family: 'Inter', sans-serif;
+  }
+
+  /* Sleek custom scrollbar matching zinc dark theme */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--muted));
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground)/0.4);
+  }
+}
+
+@theme {
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+}
+
+/* shadcn-svelte Unified Component mapping */
+@utility glass-panel {
+  @apply bg-card border border-border rounded-xl shadow-sm;
+}
+@utility panel {
+  @apply bg-card border border-border rounded-xl p-5 shadow-sm;
+}
+@utility btn {
+  @apply px-3.5 py-1.5 text-xs font-semibold rounded-lg border border-border bg-background hover:bg-accent hover:text-accent-foreground disabled:opacity-50 transition-colors cursor-pointer inline-flex items-center justify-center gap-1.5;
+}
+@utility glass-btn {
+  @apply px-3.5 py-1.5 text-xs font-semibold rounded-lg border border-border bg-background hover:bg-accent hover:text-accent-foreground disabled:opacity-50 transition-colors cursor-pointer inline-flex items-center justify-center gap-1.5;
+}
+@utility primary {
+  @apply bg-primary text-primary-foreground hover:bg-primary/90 shadow-md border-transparent!;
+}
+@utility danger {
+  @apply bg-destructive text-destructive-foreground hover:bg-destructive/90 shadow-sm border-transparent!;
+}
+@utility status-bar {
+  @apply grid grid-cols-2 md:grid-cols-5 gap-4 border border-border bg-card rounded-xl p-5 shadow-sm;
+}
+@utility metric-grid {
+  @apply grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4;
+}
+@utility metric-card {
+  @apply bg-card border border-border rounded-xl p-5 shadow-sm flex flex-col gap-1;
+}
+@utility table {
+  @apply flex flex-col gap-2 w-full;
+}
+@utility row {
+  @apply flex items-center justify-between border border-border bg-muted/5 rounded-lg p-3 hover:bg-muted/10 transition-colors;
+}
+@utility event-row {
+  @apply flex flex-col gap-1 border border-border bg-muted/5 rounded-lg p-3 hover:bg-muted/10 transition-colors border-l-4 border-l-primary;
+}
+@utility input {
+  @apply bg-background text-foreground border border-border rounded-md px-3 py-1.5 text-xs outline-none focus:border-ring w-full;
+}
+@utility select {
+  @apply bg-background text-foreground border border-border rounded-md px-3 py-1.5 text-xs outline-none focus:border-ring cursor-pointer;
+}
+@utility textarea {
+  @apply bg-background text-foreground border border-border rounded-md px-3 py-1.5 text-xs outline-none focus:border-ring w-full min-h-[80px];
+}
+@utility badge {
+  @apply text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border inline-block bg-muted border-border text-muted-foreground;
+}
+@utility panel-header {
+  @apply flex justify-between items-center border-b border-border pb-3 mb-2;
+}
+
+/* Monitoring Page specifics mapping */
+@utility video-grid {
+  @apply grid gap-4 h-full;
+}
+@utility grid-auto {
+  @apply grid-cols-1 md:grid-cols-2 lg:grid-cols-3;
+}
+@utility grid-1x1 {
+  @apply grid-cols-1;
+}
+@utility grid-2x2 {
+  @apply grid-cols-2;
+}
+@utility grid-3x3 {
+  @apply grid-cols-3;
+}
+@utility grid-4x4 {
+  @apply grid-cols-4;
+}
+@utility camera-tile {
+  @apply flex flex-col bg-transparent overflow-hidden;
+}
+@utility stream-surface {
+  @apply relative w-full aspect-video bg-black border border-border rounded-xl overflow-hidden hover:border-muted-foreground/30 transition-all duration-200;
+
+  & video {
+    @apply absolute inset-0 w-full h-full object-contain;
+  }
+
+  & canvas {
+    @apply absolute inset-0 w-full h-full object-contain pointer-events-none;
+  }
+}
+@utility stream-meta {
+  @apply absolute left-3 bottom-3 flex gap-2 font-mono text-[10px];
+
+  & span {
+    @apply bg-black/60 border border-border px-2 py-0.5 rounded text-white;
+  }
+}
+
+/* Settings and custom layouts styling */
+@utility tab-btn {
+  @apply px-4 py-2 text-xs font-semibold rounded-lg text-muted-foreground hover:text-foreground cursor-pointer transition-colors border border-transparent;
+}
+@utility tab-btn-active {
+  @apply bg-muted text-foreground border-border!;
+}

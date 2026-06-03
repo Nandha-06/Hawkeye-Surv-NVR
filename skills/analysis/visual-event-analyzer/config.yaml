@@ -1,0 +1,81 @@
+# Moondream Live Video Analyzer — Configuration Schema
+# Parsed by Hawkeye skill-registry-service.cjs → parseConfigYaml()
+
+params:
+  - key: auto_start
+    label: Auto Start
+    type: boolean
+    default: true
+    description: "Start this skill automatically when Hawkeye launches"
+
+  - key: predefined_trigger
+    label: Trigger Type
+    type: select
+    default: smiling
+    description: "Choose a preconfigured action/gesture trigger, or choose 'None' to only generate visual captions."
+    options:
+      - { value: none, label: "🚫 None (Captions/Summaries Only)" }
+      - { value: smiling, label: "😊 Smiling" }
+      - { value: thumbs-up, label: "👍 Thumbs Up" }
+      - { value: tongue-out, label: "👅 Sticking Tongue Out" }
+      - { value: peace-sign, label: "✌️ Peace Sign" }
+      - { value: drinking-water, label: "💧 Drinking Water" }
+      - { value: custom, label: "⚙️ Custom Trigger (Defined Below)" }
+
+  - key: moondream_api_key
+    label: Moondream Cloud API Key
+    type: password
+    default: ""
+    description: "Enter your Moondream Cloud API key. If left blank, the skill will fall back to Hawkeye's local VLM engine."
+
+  - key: query_summary
+    label: Visual Summary Prompt
+    type: string
+    default: "summarize what you see in one short sentence"
+    description: "Prompt sent to Moondream to continuously narrate the scene."
+
+  - key: query_trigger
+    label: Custom Trigger Prompt
+    type: string
+    default: "is anyone smiling? yes or no"
+    description: "VLM Prompt used to check for specific behaviors (only active when Trigger Type is Custom)."
+
+  - key: trigger_text
+    label: Custom Trigger Match Text
+    type: string
+    default: "yes"
+    description: "Substring to search for in the VLM's trigger response (case-insensitive, only active when Trigger Type is Custom)."
+
+  - key: notification_text
+    label: Custom Alert Message
+    type: string
+    default: "😊 Smile Detected!"
+    description: "The alert text emitted when trigger conditions are met (only active when Trigger Type is Custom)."
+
+  - key: alert_severity
+    label: Alert Severity
+    type: select
+    default: warning
+    description: "Timeline and RAG priority level for matched triggers."
+    options:
+      - { value: info, label: "Information (Green)" }
+      - { value: warning, label: "Warning (Yellow)" }
+      - { value: critical, label: "Critical Alert (Red)" }
+
+  - key: cooldown
+    label: VLM Cooldown (seconds)
+    type: number
+    default: 5
+    description: "Minimum delay between consecutive VLM requests to control bandwidth and rate limits."
+
+  - key: fps
+    label: Frame Rate
+    type: select
+    default: 1
+    description: "Rate at which camera frames are sent for VLM analysis. Higher FPS consumes more API requests/compute."
+    options:
+      - { value: 0.2, label: "Ultra Low (0.2 FPS / 5s delay)" }
+      - { value: 0.5, label: "Low (0.5 FPS / 2s delay)" }
+      - { value: 1, label: "Normal (1 FPS)" }
+      - { value: 3, label: "Active (3 FPS)" }
+      - { value: 5, label: "High (5 FPS)" }

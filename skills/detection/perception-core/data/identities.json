@@ -1,0 +1,30 @@
+[
+  {
+    "id": "stranger_1",
+    "last_seen": "2026-06-02T11:28:29.510Z",
+    "crop_paths": [
+      "C:\\Users\\rtnan\\Desktop\\DeepCamera\\skills\\detection\\perception-core\\data\\crops\\stranger_1_face.jpg"
+    ]
+  },
+  {
+    "id": "stranger_2",
+    "last_seen": "2026-06-02T11:28:09.910Z",
+    "crop_paths": [
+      "C:\\Users\\rtnan\\Desktop\\DeepCamera\\skills\\detection\\perception-core\\data\\crops\\stranger_2_face.jpg"
+    ]
+  },
+  {
+    "id": "stranger_3",
+    "last_seen": "2026-06-02T11:28:10.316Z",
+    "crop_paths": [
+      "C:\\Users\\rtnan\\Desktop\\DeepCamera\\skills\\detection\\perception-core\\data\\crops\\stranger_3_face.jpg"
+    ]
+  },
+  {
+    "id": "stranger_4",
+    "last_seen": "2026-06-02T11:28:22.309Z",
+    "crop_paths": [
+      "C:\\Users\\rtnan\\Desktop\\DeepCamera\\skills\\detection\\perception-core\\data\\crops\\stranger_4_face.jpg"
+    ]
+  }
+]
