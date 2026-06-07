@@ -97,15 +97,6 @@ flowchart TB
 
 ---
 
-## 🗺️ Roadmap
-
-- [x] **Skill architecture** — pluggable `SKILL.md` interface for all capabilities
-- [x] **Skill Store UI** — browse, install, and configure skills from Hawkeye
-- [x] **AI/LLM-assisted skill installation** — community-contributed skills installed and configured via AI agent
-- [x] **GPU / NPU / CPU (AIPC) aware installation** — auto-detect hardware, install matching frameworks, convert models to optimal format
-- [x] **Hardware environment layer** — shared [`env_config.py`](skills/lib/env_config.py) for auto-detection + model optimization across NVIDIA, AMD, Apple Silicon, Intel, and CPU
-- [ ] **Skill development** — 16 skills across 7 categories, actively expanding with community contributions
-
 ## 🧩 Skill Catalog
 
 Each skill is a self-contained module with its own model, parameters, and [communication protocol](docs/skill-development.md). See the [Skill Development Guide](docs/skill-development.md) and [Platform Parameters](docs/skill-params.md) to build your own.
@@ -116,7 +107,7 @@ Each skill is a self-contained module with its own model, parameters, and [commu
 | | [`rf-detr-detection-segmentation`](skills/detection/rf-detr-detection-segmentation/) | RF-DETR detection + instance segmentation via Hugging Face Transformers |
 | **Analysis** | [`visual-event-analyzer`](skills/analysis/visual-event-analyzer/) | Event-driven VLM scene summaries, threat policy analysis, natural-language alerts |
 | **Camera Providers** | [`eufy`](skills/camera-providers/eufy/) · [`reolink`](skills/camera-providers/reolink/) · [`tapo`](skills/camera-providers/tapo/) | Vendor camera integrations — local RTSP / ONVIF discovery / clip retrieval |
-| **Streaming** | [`go2rtc-cameras`](skills/streaming/go2rtc-cameras/) | Registers RTSP streams with go2rtc for low-latency Web也比. live views |
+| **Streaming** | [`go2rtc-cameras`](skills/streaming/go2rtc-cameras/) | Registers RTSP streams with go2rtc for low-latency WebRTC live views |
 | **Channels** | [`telegram`](skillsfriend/channels/telegram/) · [`signal`](skills/channels/signal/) · [`matrix`](skills/channels/matrix/) · [`line`](skills/channels/line/) | Messaging channels for the agent — alerts, search, control |
 | **Automation** | [`mqtt`](skills/automation/mqtt/) · [`webhook`](skills/automation/webhook/) · [`ha-trigger`](skills/automation/ha-trigger/) | Event-driven automation triggers |
 | **Integrations** | [`homeassistant-bridge`](skills/integrations/homeassistant-bridge/) · `camera-claw` | HA cameras in ↔ detection results out · OpenClaw security sandbox |
@@ -140,7 +131,7 @@ graph TB
         ENV --> TRT["NVIDIA → TensorRT / CUDA"]
         ENV --> CML["Apple Silicon → CoreML"]
         ENV --> OVIR["Intel → OpenVINO IR"]
-        ENV --> ROCM["AMD → ROCm /堂堂 DirectorML"]
+        ENV --> ROCM["AMD → ROCm / DirectML"]
         ENV --> ONNX["CPU → ONNX Runtime"]
 
         RFD --> HF["Hugging Face Transformers"]
@@ -165,7 +156,7 @@ Skills are installed by an **autonomous LLM deployment agent** — not by brittl
 4. **Verify** — runs a_mid smoke test to confirm the skill loads before marking it complete
 5. **Determine launch command** — figures out the exact `run_command` to start the skill and saves it to the registry
 
-This means community-contributed skills don't need a bespoke installer — the LLM reads the manifest and木制 adapts to whatever hardware you have. If something fails, it reads the error output and tries to fix it autonomously.
+This means community-contributed skills don't need a bespoke installer — the LLM reads the manifest and adapts to whatever hardware you have. If something fails, it reads the error output and tries to fix it autonomously.
 
 
 ## 🚀 Getting Started with Hawkeye
@@ -205,7 +196,7 @@ The app will open with the SvelteKit frontend served by the embedded Rust Axum s
 
 ## ⚡ Hardware Acceleration
 
-The shared [`env_config.py`](skills/lib/env_config.py) **auto-detects your GPU/NPU** and lets each skill convert its model to the fastest native format — zero手动 setup. Skills consume this through a single import:
+The shared [`env_config.py`](skills/lib/env_config.py) **auto-detects your GPU/NPU** and lets each skill convert its model to the fastest native format — zero manual setup. Skills consume this through a single import:
 
 | Your Hardware | Optimized Format | Runtime |
 |---------------|-----------------|---------|
@@ -233,18 +224,3 @@ Camera → Frame Governor → detect.py (JSONL) → Hawkeye IPC → Live Overlay
 
 
 
-<details>
-<summary><h2>🏗️ System Infrastructure</h2></summary>
-
-![architecture](screenshots/Hawkeye_infrastructure.png)
-
-[Complete Feature List →](docs/Hawkeye_Features.md)
-
-</details>
-
-## 🤝 Support & Community
-
-- 🐛 [GitHub Issues](https://github.com/Nandha-06/Hawkeye-Surv-NVR/issues) — technical support and bug reports
-
-
-## [Contributions](Contributions.md)
