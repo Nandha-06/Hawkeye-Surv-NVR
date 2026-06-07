@@ -1,0 +1,15 @@
+[RF-DETR-deploy] Searching for Python...
+ERROR: To modify pip, please run the following command:
+C:\Users\rtnan\Desktop\Hawkeye\skills\detection\rf-detr-detection-segmentation\.venv\Scripts\python.exe -m pip install --upgrade pip -q
+
+[notice] A new release of pip is available: 24.0 -> 26.1.2
+[notice] To update, run: C:\Users\rtnan\Desktop\Hawkeye\skills\detection\rf-detr-detection-segmentation\.venv\Scripts\python.exe -m pip install --upgrade pip
+
+[notice] A new release of pip is available: 24.0 -> 26.1.2
+[notice] To update, run: C:\Users\rtnan\Desktop\Hawkeye\skills\detection\rf-detr-detection-segmentation\.venv\Scripts\python.exe -m pip install --upgrade pip
+
+[notice] A new release of pip is available: 24.0 -> 26.1.2
+[notice] To update, run: C:\Users\rtnan\Desktop\Hawkeye\skills\detection\rf-detr-detection-segmentation\.venv\Scripts\python.exe -m pip install --upgrade pip
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+AssertionError: torch.float8_e8m0fnu missing; torch>=2.6.0 required

@@ -49,6 +49,9 @@ venv/
 env/
 .env/
 .env
+scratch_venv/
+ENV/
+virtualenvs/
 
 # Local build and workspace caches
 .cache/

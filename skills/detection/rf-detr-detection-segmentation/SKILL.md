@@ -7,8 +7,8 @@ deploy: deploy.sh
 
 requirements:
   python: ">=3.10"
-  torch: ">=2.4.0"
-  transformers: ">=5.9.0"
+  torch: ">=2.6.0,<3.0.0"
+  transformers: ">=5.9.0,<6.0.0"
   platforms: ["linux", "macos", "windows"]
 
 parameters:

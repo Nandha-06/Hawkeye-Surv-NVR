@@ -38,10 +38,13 @@ os.environ.setdefault("YOLO_AUTOINSTALL", "0")
 # Allowed roots for frame_path / file_path values received on stdin. Only
 # paths inside these roots are accepted; everything else is rejected to
 # prevent arbitrary-file-read / exfil primitives via crafted messages.
+import tempfile
+
 _ALLOWED_FRAME_ROOTS = [
     Path(".temp").resolve(),
     Path(".data/snapshots").resolve(),
     Path(".data/frames").resolve(),
+    Path(tempfile.gettempdir()).resolve(),
     Path("/tmp").resolve(),
 ]
 
@@ -53,10 +56,7 @@ def _is_safe_frame_path(p) -> bool:
     s = os.fsdecode(p)
     if "\x00" in s or "\n" in s or "\r" in s:
         return False
-    # Reject obvious escape attempts before resolving
     lowered = s.replace("\\", "/")
-    if lowered.startswith("/") or lowered.startswith("~"):
-        return False
     if "/.." in lowered or lowered.startswith("../") or ".." in Path(s).parts:
         return False
     try:
@@ -572,6 +572,86 @@ def load_config(args):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Snapshot Persistence Helper
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Path to the snapshots directory, provided by the Rust supervisor via env.
+# The skill writes JPEGs directly to this location and ships the file path
+# (not the bytes) in the event JSON, avoiding base64 inflation over stdio.
+_SNAPSHOT_DIR: Optional[Path] = None
+
+
+def _init_snapshot_dir() -> Optional[Path]:
+    """Resolve and create the snapshot output directory (one-time at startup)."""
+    global _SNAPSHOT_DIR
+    if _SNAPSHOT_DIR is not None:
+        return _SNAPSHOT_DIR
+    raw = os.environ.get("DEEPCAMERA_SNAPSHOTS_DIR", "").strip()
+    if not raw:
+        _SNAPSHOT_DIR = None
+        return None
+    try:
+        p = Path(raw)
+        p.mkdir(parents=True, exist_ok=True)
+        _SNAPSHOT_DIR = p
+        return p
+    except Exception as e:
+        log(f"snapshot dir init failed: {e}")
+        _SNAPSHOT_DIR = None
+        return None
+
+
+def save_snapshot_jpg(frame_bgr, camera_id: str, max_width: int = 960, quality: int = 70) -> Optional[str]:
+    """Downscale + JPEG-encode a BGR frame and write it directly to disk.
+
+    Returns the absolute path on success, or None on failure. The returned
+    path is what gets shipped in the event JSON. Returns None if the
+    snapshot directory wasn't configured (e.g., running standalone).
+    """
+    if frame_bgr is None:
+        return None
+    snap_dir = _init_snapshot_dir()
+    if snap_dir is None:
+        return None
+    try:
+        import cv2
+        h, w = frame_bgr.shape[:2]
+        if w > max_width:
+            scale = max_width / float(w)
+            new_w = max_width
+            new_h = max(1, int(round(h * scale)))
+            resized = cv2.resize(frame_bgr, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        else:
+            resized = frame_bgr
+        ok, buf = cv2.imencode(
+            ".jpg", resized,
+            [int(cv2.IMWRITE_JPEG_QUALITY), int(quality)],
+        )
+        if not ok:
+            return None
+
+        # Nanosecond resolution guarantees uniqueness even for back-to-back
+        # events on the same camera within the same millisecond.
+        safe_cam = "".join(c if c.isalnum() or c in "-_" else "_" for c in camera_id)
+        filename = f"{safe_cam}_{time.time_ns()}.jpg"
+        out_path = snap_dir / filename
+        # Write atomically via a tmp file so a half-written JPEG can never
+        # be observed by the Rust consumer.
+        tmp_path = out_path.with_suffix(".jpg.tmp")
+        with open(tmp_path, "wb") as f:
+            f.write(buf.tobytes())
+            f.flush()
+            try:
+                os.fsync(f.fileno())
+            except OSError:
+                pass
+        os.replace(tmp_path, out_path)
+        return str(out_path)
+    except Exception as e:
+        log(f"snapshot save failed: {e}")
+        return None
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Main Pipeline
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -816,87 +896,6 @@ def main():
     emit(ready_event)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Snapshot Persistence Helper
-# ──────────────────────────────────────────────────────────────────────────────
-
-# Path to the snapshots directory, provided by the Rust supervisor via env.
-# The skill writes JPEGs directly to this location and ships the file path
-# (not the bytes) in the event JSON, avoiding base64 inflation over stdio.
-_SNAPSHOT_DIR: Optional[Path] = None
-
-
-def _init_snapshot_dir() -> Optional[Path]:
-    """Resolve and create the snapshot output directory (one-time at startup)."""
-    global _SNAPSHOT_DIR
-    if _SNAPSHOT_DIR is not None:
-        return _SNAPSHOT_DIR
-    raw = os.environ.get("DEEPCAMERA_SNAPSHOTS_DIR", "").strip()
-    if not raw:
-        _SNAPSHOT_DIR = None
-        return None
-    try:
-        p = Path(raw)
-        p.mkdir(parents=True, exist_ok=True)
-        _SNAPSHOT_DIR = p
-        return p
-    except Exception as e:
-        log(f"snapshot dir init failed: {e}")
-        _SNAPSHOT_DIR = None
-        return None
-
-
-def save_snapshot_jpg(frame_bgr, camera_id: str, max_width: int = 960, quality: int = 70) -> Optional[str]:
-    """Downscale + JPEG-encode a BGR frame and write it directly to disk.
-
-    Returns the absolute path on success, or None on failure. The returned
-    path is what gets shipped in the event JSON. Returns None if the
-    snapshot directory wasn't configured (e.g., running standalone).
-    """
-    if frame_bgr is None:
-        return None
-    snap_dir = _init_snapshot_dir()
-    if snap_dir is None:
-        return None
-    try:
-        import cv2
-        h, w = frame_bgr.shape[:2]
-        if w > max_width:
-            scale = max_width / float(w)
-            new_w = max_width
-            new_h = max(1, int(round(h * scale)))
-            resized = cv2.resize(frame_bgr, (new_w, new_h), interpolation=cv2.INTER_AREA)
-        else:
-            resized = frame_bgr
-        ok, buf = cv2.imencode(
-            ".jpg", resized,
-            [int(cv2.IMWRITE_JPEG_QUALITY), int(quality)],
-        )
-        if not ok:
-            return None
-
-        # Nanosecond resolution guarantees uniqueness even for back-to-back
-        # events on the same camera within the same millisecond.
-        safe_cam = "".join(c if c.isalnum() or c in "-_" else "_" for c in camera_id)
-        filename = f"{safe_cam}_{time.time_ns()}.jpg"
-        out_path = snap_dir / filename
-        # Write atomically via a tmp file so a half-written JPEG can never
-        # be observed by the Rust consumer.
-        tmp_path = out_path.with_suffix(".jpg.tmp")
-        with open(tmp_path, "wb") as f:
-            f.write(buf.tobytes())
-            f.flush()
-            try:
-                os.fsync(f.fileno())
-            except OSError:
-                pass
-        os.replace(tmp_path, out_path)
-        return str(out_path)
-    except Exception as e:
-        log(f"snapshot save failed: {e}")
-        return None
-
-
     # ── Graceful shutdown ────────────────────────────────────────────────
     def handle_signal(signum, frame):
         sig_name = "SIGTERM" if signum == signal.SIGTERM else "SIGINT"
@@ -923,7 +922,10 @@ def save_snapshot_jpg(frame_bgr, camera_id: str, max_width: int = 960, quality: 
 
         frame_id = 0
         
-        for line in sys.stdin:
+        while True:
+            line = sys.stdin.readline()
+            if not line:
+                break
             line = line.strip()
             if not line:
                 continue
@@ -942,8 +944,15 @@ def save_snapshot_jpg(frame_bgr, camera_id: str, max_width: int = 960, quality: 
                 # Fetch keyframe directly from go2rtc via HTTP
                 try:
                     import urllib.parse
-                    safe_src = urllib.parse.quote(camera_id)
-                    resp = requests.get(f"http://127.0.0.1:1984/api/frame.jpeg?src={safe_src}", timeout=2.0)
+                    
+                    # Try sub-stream first, then fallback to main stream
+                    safe_src_sub = urllib.parse.quote(f"{camera_id}_sub")
+                    safe_src_main = urllib.parse.quote(camera_id)
+                    
+                    resp = requests.get(f"http://127.0.0.1:1984/api/frame.jpeg?src={safe_src_sub}", timeout=1.0)
+                    if resp.status_code != 200:
+                        resp = requests.get(f"http://127.0.0.1:1984/api/frame.jpeg?src={safe_src_main}", timeout=2.0)
+                        
                     if resp.status_code != 200:
                         log(f"WARNING: Failed to fetch snapshot from go2rtc (HTTP {resp.status_code})")
                         continue
@@ -1084,7 +1093,6 @@ def save_snapshot_jpg(frame_bgr, camera_id: str, max_width: int = 960, quality: 
                     perf.record("fusion", (time.perf_counter() - t0) * 1000)
                     
                     # ─── 6. Emit detections (NO base64 live_frame emission!) ───
-                    _snap = save_snapshot_jpg(frame_img, camera_id)
                     _payload = {
                         "event": "detections",
                         "frame_id": frame_id,
@@ -1092,8 +1100,6 @@ def save_snapshot_jpg(frame_bgr, camera_id: str, max_width: int = 960, quality: 
                         "timestamp": timestamp,
                         "objects": objects_out,
                     }
-                    if _snap is not None:
-                        _payload["snapshot_path"] = _snap
                     emit(_payload)
                     
                     check_and_trigger_vlm(
@@ -1365,7 +1371,6 @@ def save_snapshot_jpg(frame_bgr, camera_id: str, max_width: int = 960, quality: 
 
                     # ─── 6. Emit detections ───
                     t0 = time.perf_counter()
-                    _snap = save_snapshot_jpg(frame_img, camera_id)
                     _payload = {
                         "event": "detections",
                         "frame_id": frame_id,
@@ -1373,8 +1378,6 @@ def save_snapshot_jpg(frame_bgr, camera_id: str, max_width: int = 960, quality: 
                         "timestamp": timestamp,
                         "objects": objects_out,
                     }
-                    if _snap is not None:
-                        _payload["snapshot_path"] = _snap
                     emit(_payload)
                     perf.record("emit", (time.perf_counter() - t0) * 1000)
 

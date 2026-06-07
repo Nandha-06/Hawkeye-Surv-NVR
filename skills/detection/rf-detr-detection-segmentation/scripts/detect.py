@@ -382,6 +382,8 @@ class RfDetrRunner:
 
     def load(self) -> float:
         import torch
+        if not hasattr(torch, "float8_e8m0fnu"):
+            torch.float8_e8m0fnu = torch.float32
         from transformers import AutoImageProcessor
 
         t0 = time.perf_counter()

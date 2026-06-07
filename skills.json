@@ -14,40 +14,6 @@
   },
   "skills": [
     {
-      "id": "visual-event-analyzer",
-      "name": "Visual Event Analyzer",
-      "description": "Event-driven visual summaries, natural language alerts, and threat policy analysis using visual language models (VLM).",
-      "version": "1.0.0",
-      "category": "analysis",
-      "path": "skills/analysis/visual-event-analyzer",
-      "tags": [
-        "vlm",
-        "event-analysis",
-        "threat-detection",
-        "visual-summary"
-      ],
-      "platforms": [
-        "linux-x64",
-        "linux-arm64",
-        "darwin-arm64",
-        "darwin-x64",
-        "win-x64"
-      ],
-      "requirements": {
-        "python": ">=3.9",
-        "ram_gb": 2
-      },
-      "capabilities": [
-        "live_detection",
-        "threat_analysis"
-      ],
-      "ui_unlocks": [
-        "detection_overlay",
-        "detection_results"
-      ]
-    },
-
-    {
       "id": "perception-core",
       "name": "Perception Core",
       "description": "Unified shared perception pipeline — real-time YOLO object detection with ByteTrack tracking, ROI face detection, face recognition, and hardware backend abstraction.",

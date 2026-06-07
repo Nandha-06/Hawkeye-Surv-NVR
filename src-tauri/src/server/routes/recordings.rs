@@ -351,53 +351,32 @@ pub async fn upload_recording(
 
     };
 
-    let output_filename = format!("segment_{}.mp4", formatted_time);
+    let output_filename = format!("segment_{}.ts", formatted_time);
+    let output_ts_path = recordings_dir.join(&output_filename);
 
-    let output_mp4_path = recordings_dir.join(&output_filename);
-
-    // Asynchronously transcode webm to mp4 using FFmpeg
-
+    // Asynchronously transcode webm to ts using FFmpeg
     println!(
-
         "[Server] Transcoding uploaded webm chunk: ffmpeg -i {:?} -> {:?}",
-
-        temp_webm_path, output_mp4_path
-
+        temp_webm_path, output_ts_path
     );
 
     let mut child = match tokio::process::Command::new("ffmpeg")
-
         .arg("-y")
-
         .arg("-i")
-
         .arg(&temp_webm_path)
-
         .arg("-c:v")
-
         .arg("libx264")
-
         .arg("-preset")
-
         .arg("ultrafast")
-
         .arg("-tune")
-
         .arg("zerolatency")
-
         .arg("-c:a")
-
         .arg("aac")
-
         .arg("-b:a")
-
         .arg("128k")
-
         .arg("-f")
-
-        .arg("mp4")
-
-        .arg(&output_mp4_path)
+        .arg("mpegts")
+        .arg(&output_ts_path)
 
         .stdout(std::process::Stdio::null())
 
@@ -437,7 +416,7 @@ pub async fn upload_recording(
 
                 let id = generate_random_id();
 
-                let filepath_str = output_mp4_path.to_string_lossy().to_string();
+                let filepath_str = output_ts_path.to_string_lossy().to_string();
 
                 let insert_res = conn.execute(
 
@@ -520,5 +499,4 @@ pub struct PlaylistItem {
 
     pub duration: f64,
 
-    pub seek_start: Option<f64>,
 }

@@ -36,6 +36,13 @@ if not exist "%VENV_DIR%\Scripts\python.exe" (
 
 set "PIP=%VENV_DIR%\Scripts\pip.exe"
 set "VPYTHON=%VENV_DIR%\Scripts\python.exe"
+
+"%VPYTHON%" -m pip --version >nul 2>&1
+if !errorlevel! neq 0 (
+    echo {"event":"progress","stage":"venv","message":"Bootstrapping pip..."}
+    "%VPYTHON%" -m ensurepip --upgrade >nul 2>&1
+)
+
 "%PIP%" install --upgrade pip -q
 
 set "BACKEND=cpu"
@@ -46,6 +53,17 @@ set "REQ_FILE=%SKILL_DIR%\requirements_!BACKEND!.txt"
 if not exist "!REQ_FILE!" set "REQ_FILE=%SKILL_DIR%\requirements_cpu.txt"
 
 echo {"event":"progress","stage":"install","backend":"!BACKEND!","message":"Installing RF-DETR dependencies for !BACKEND!..."}
+if "!BACKEND!"=="cuda" (
+    echo {"event":"progress","stage":"install","backend":"cuda","message":"Pre-installing PyTorch CUDA wheels (>=2.6.0)..."}
+    "%PIP%" install --upgrade "torch>=2.6.0,<3.0.0" "torchvision>=0.21.0,<1.0.0" --index-url https://download.pytorch.org/whl/cu124
+) else (
+    echo {"event":"progress","stage":"install","backend":"!BACKEND!","message":"Pre-installing PyTorch wheels (>=2.6.0)..."}
+    "%PIP%" install --upgrade "torch>=2.6.0,<3.0.0" "torchvision>=0.21.0,<1.0.0"
+)
+if !errorlevel! neq 0 (
+    echo {"event":"error","stage":"install","message":"PyTorch installation failed"}
+    exit /b 1
+)
 "%PIP%" install -r "!REQ_FILE!"
 if !errorlevel! neq 0 (
     echo {"event":"error","stage":"install","message":"Dependency installation failed"}
@@ -53,7 +71,7 @@ if !errorlevel! neq 0 (
 )
 
 echo {"event":"progress","stage":"verify","message":"Verifying RF-DETR imports..."}
-"%VPYTHON%" -c "from transformers import AutoImageProcessor, RfDetrForInstanceSegmentation; import torch; print({'torch': torch.__version__, 'cuda': torch.cuda.is_available()})"
+"%VPYTHON%" -c "import torch; (setattr(torch, 'float8_e8m0fnu', torch.float32) if not hasattr(torch, 'float8_e8m0fnu') else None); from transformers import AutoImageProcessor, RfDetrForInstanceSegmentation, AutoModelForObjectDetection; print({'torch': torch.__version__, 'cuda': torch.cuda.is_available()})"
 if !errorlevel! neq 0 (
     echo {"event":"error","stage":"verify","message":"RF-DETR import verification failed"}
     exit /b 1

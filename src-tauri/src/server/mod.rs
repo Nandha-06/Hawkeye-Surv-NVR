@@ -184,6 +184,7 @@ pub async fn start_server(tx: broadcast::Sender<String>) {
         )
         .route("/api/v1/exports", get(get_exports).post(create_export))
         .route("/api/v1/exports/:id/download", get(download_export))
+        .layer(axum::extract::DefaultBodyLimit::max(50 * 1024 * 1024))
         .route_layer(middleware::from_fn_with_state(state.clone(), check_token));
 
     // 3. Combined app with both routers

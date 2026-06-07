@@ -17,6 +17,16 @@ pub struct MotionDetector {
     height: usize,
     dw: usize,
     dh: usize,
+    gray: Vec<u8>,
+    blurred_h: Vec<u8>,
+    blurred: Vec<u8>,
+    frame_delta: Vec<u8>,
+    thresh: Vec<u8>,
+    dilated_h: Vec<u8>,
+    dilated: Vec<u8>,
+    temp_sort: Vec<u8>,
+    visited: Vec<bool>,
+    stack: Vec<(usize, usize)>,
 }
 
 impl MotionDetector {
@@ -38,6 +48,16 @@ impl MotionDetector {
             height: h,
             dw,
             dh,
+            gray: vec![0u8; dw * dh],
+            blurred_h: vec![0u8; dw * dh],
+            blurred: vec![0u8; dw * dh],
+            frame_delta: vec![0u8; dw * dh],
+            thresh: vec![0u8; dw * dh],
+            dilated_h: vec![0u8; dw * dh],
+            dilated: vec![0u8; dw * dh],
+            temp_sort: vec![0u8; dw * dh],
+            visited: vec![false; dw * dh],
+            stack: Vec::with_capacity(dw * dh),
         }
     }
 
@@ -45,14 +65,13 @@ impl MotionDetector {
         let dw = self.dw;
         let dh = self.dh;
 
-        let mut gray = vec![0u8; dw * dh];
         for i in 0..(dw * dh) {
             let src_idx = i * 3;
             if src_idx + 2 < frame_bgr.len() {
                 let b = frame_bgr[src_idx];
                 let g = frame_bgr[src_idx + 1];
                 let r = frame_bgr[src_idx + 2];
-                gray[i] = ((b as u32 * 114 + g as u32 * 587 + r as u32 * 299) / 1000) as u8;
+                self.gray[i] = ((b as u32 * 114 + g as u32 * 587 + r as u32 * 299) / 1000) as u8;
             }
         }
 
@@ -69,13 +88,12 @@ impl MotionDetector {
                         }
                     }
                     if is_masked {
-                        gray[dy * dw + dx] = 0;
+                        self.gray[dy * dw + dx] = 0;
                     }
                 }
             }
         }
 
-        let mut blurred_h = vec![0u8; dw * dh];
         let radius = 4;
         for y in 0..dh {
             for x in 0..dw {
@@ -84,14 +102,13 @@ impl MotionDetector {
                 let x_start = if x >= radius { x - radius } else { 0 };
                 let x_end = std::cmp::min(x + radius, dw - 1);
                 for kx in x_start..=x_end {
-                    sum += gray[y * dw + kx] as u32;
+                    sum += self.gray[y * dw + kx] as u32;
                     count += 1;
                 }
-                blurred_h[y * dw + x] = (sum / count) as u8;
+                self.blurred_h[y * dw + x] = (sum / count) as u8;
             }
         }
 
-        let mut blurred = vec![0u8; dw * dh];
         for y in 0..dh {
             let y_start = if y >= radius { y - radius } else { 0 };
             let y_end = std::cmp::min(y + radius, dh - 1);
@@ -99,10 +116,10 @@ impl MotionDetector {
                 let mut sum = 0u32;
                 let mut count = 0u32;
                 for ky in y_start..=y_end {
-                    sum += blurred_h[ky * dw + x] as u32;
+                    sum += self.blurred_h[ky * dw + x] as u32;
                     count += 1;
                 }
-                blurred[y * dw + x] = (sum / count) as u8;
+                self.blurred[y * dw + x] = (sum / count) as u8;
             }
         }
 
@@ -112,33 +129,32 @@ impl MotionDetector {
             None => {
                 let mut first_avg = vec![0f32; dw * dh];
                 for i in 0..(dw * dh) {
-                    first_avg[i] = blurred[i] as f32;
+                    first_avg[i] = self.blurred[i] as f32;
                 }
                 self.avg_frame = Some(first_avg);
                 return false;
             }
         };
 
-        let mut frame_delta = vec![0u8; dw * dh];
         for i in 0..(dw * dh) {
-            avg[i] = (1.0 - alpha) * avg[i] + alpha * blurred[i] as f32;
-            let diff = (blurred[i] as f32 - avg[i]).abs();
-            frame_delta[i] = diff.round() as u8;
+            avg[i] = (1.0 - alpha) * avg[i] + alpha * self.blurred[i] as f32;
+            let diff = (self.blurred[i] as f32 - avg[i]).abs();
+            self.frame_delta[i] = diff.round() as u8;
         }
 
-        let mut temp = frame_delta.clone();
-        temp.sort_unstable();
-        let p96 = temp[(temp.len() * 96) / 100];
+        self.temp_sort.copy_from_slice(&self.frame_delta);
+        self.temp_sort.sort_unstable();
+        let p96 = self.temp_sort[(self.temp_sort.len() * 96) / 100];
         let dynamic_thresh = std::cmp::max(self.threshold, (p96 as f32 * 1.5) as u8);
 
-        let mut thresh = vec![0u8; dw * dh];
         for i in 0..(dw * dh) {
-            if frame_delta[i] > dynamic_thresh {
-                thresh[i] = 255;
+            if self.frame_delta[i] > dynamic_thresh {
+                self.thresh[i] = 255;
+            } else {
+                self.thresh[i] = 0;
             }
         }
 
-        let mut dilated_h = vec![0u8; dw * dh];
         let dil_radius = 2;
         for y in 0..dh {
             for x in 0..dw {
@@ -146,45 +162,44 @@ impl MotionDetector {
                 let x_start = if x >= dil_radius { x - dil_radius } else { 0 };
                 let x_end = std::cmp::min(x + dil_radius, dw - 1);
                 for kx in x_start..=x_end {
-                    let val = thresh[y * dw + kx];
+                    let val = self.thresh[y * dw + kx];
                     if val > max_val {
                         max_val = val;
                     }
                 }
-                dilated_h[y * dw + x] = max_val;
+                self.dilated_h[y * dw + x] = max_val;
             }
         }
-        let mut dilated = vec![0u8; dw * dh];
         for y in 0..dh {
             let y_start = if y >= dil_radius { y - dil_radius } else { 0 };
             let y_end = std::cmp::min(y + dil_radius, dh - 1);
             for x in 0..dw {
                 let mut max_val = 0u8;
                 for ky in y_start..=y_end {
-                    let val = dilated_h[ky * dw + x];
+                    let val = self.dilated_h[ky * dw + x];
                     if val > max_val {
                         max_val = val;
                     }
                 }
-                dilated[y * dw + x] = max_val;
+                self.dilated[y * dw + x] = max_val;
             }
         }
 
         let scale_factor = (dw * dh) as f64 / (self.width * self.height) as f64;
         let scaled_min_area = std::cmp::max(50, (self.min_area as f64 * scale_factor) as usize);
 
-        let mut visited = vec![false; dw * dh];
-        let mut stack = Vec::with_capacity(dw * dh);
+        self.visited.fill(false);
+        self.stack.clear();
 
         for y in 0..dh {
             for x in 0..dw {
                 let idx = y * dw + x;
-                if dilated[idx] == 255 && !visited[idx] {
+                if self.dilated[idx] == 255 && !self.visited[idx] {
                     let mut area = 0;
-                    stack.push((x, y));
-                    visited[idx] = true;
+                    self.stack.push((x, y));
+                    self.visited[idx] = true;
 
-                    while let Some((cx, cy)) = stack.pop() {
+                    while let Some((cx, cy)) = self.stack.pop() {
                         area += 1;
 
                         let neighbors = [
@@ -197,9 +212,9 @@ impl MotionDetector {
                         for &(nx, ny) in &neighbors {
                             if nx >= 0 && nx < dw as i32 && ny >= 0 && ny < dh as i32 {
                                 let n_idx = ny as usize * dw + nx as usize;
-                                if dilated[n_idx] == 255 && !visited[n_idx] {
-                                    visited[n_idx] = true;
-                                    stack.push((nx as usize, ny as usize));
+                                if self.dilated[n_idx] == 255 && !self.visited[n_idx] {
+                                    self.visited[n_idx] = true;
+                                    self.stack.push((nx as usize, ny as usize));
                                 }
                             }
                         }
@@ -277,6 +292,8 @@ pub struct SkillsManager {
     // calls from both passing the `active_processes` contains_key check
     // and creating duplicate python processes.
     pub start_reservations: Arc<RwLock<HashSet<String>>>,
+    // Keys currently being deployed. Prevents concurrent deploy_skill calls.
+    pub deploy_reservations: Arc<RwLock<HashSet<String>>>,
     pub root_dir: PathBuf,
     pub tx: broadcast::Sender<String>,
     pub recording_manager: crate::recording_manager::RecordingManager,
@@ -299,6 +316,7 @@ impl SkillsManager {
         Self {
             active_processes: Arc::new(RwLock::new(HashMap::new())),
             start_reservations: Arc::new(RwLock::new(HashSet::new())),
+            deploy_reservations: Arc::new(RwLock::new(HashSet::new())),
             root_dir,
             tx,
             recording_manager,
@@ -328,30 +346,18 @@ impl SkillsManager {
                 skill["isRunning"] = serde_json::json!(is_running);
                 skill["status"] = serde_json::json!(if is_running { "ready" } else { "stopped" });
 
+                let is_deploying = {
+                    let res = self.deploy_reservations.read().await;
+                    res.contains(&skill_id)
+                };
+                skill["isDeploying"] = serde_json::json!(is_deploying);
+
                 // Check if installed
                 let mut is_installed = true;
                 if !relative_path.is_empty() {
                     let skill_abs_path = self.root_dir.join(&relative_path);
-                    if skill_abs_path.join("package.json").exists() {
-                        is_installed = skill_abs_path.join("node_modules").exists();
-                    } else {
-                        let requirements_path = skill_abs_path.join("requirements.txt");
-                        let mut has_dependencies = false;
-                        if requirements_path.exists() {
-                            if let Ok(req_content) = tokio::fs::read_to_string(&requirements_path).await {
-                                let lines: Vec<&str> = req_content
-                                    .lines()
-                                    .map(|l| l.trim())
-                                    .filter(|l| !l.is_empty() && !l.starts_with('#'))
-                                    .collect();
-                                if !lines.is_empty() {
-                                    has_dependencies = true;
-                                }
-                            }
-                        }
-                        if has_dependencies {
-                            is_installed = skill_abs_path.join(".venv").exists();
-                        }
+                    if skill_abs_path.join("package.json").exists() || skill_abs_path.join("requirements.txt").exists() {
+                        is_installed = skill_abs_path.join(".deployed").exists();
                     }
                 }
                 skill["isInstalled"] = serde_json::json!(is_installed);
@@ -544,7 +550,7 @@ impl SkillsManager {
                 )
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
-                .stderr(Stdio::inherit())
+                .stderr(Stdio::piped())
                 .spawn();
             let mut child = match child {
                 Ok(c) => c,
@@ -571,6 +577,15 @@ impl SkillsManager {
                     let _ = child.kill().await;
                     self.start_reservations.write().await.remove(&active_key);
                     return Err("Failed to open stdout for subprocess".into());
+                }
+            };
+            let stderr = child.stderr.take();
+            let stderr = match stderr {
+                Some(s) => s,
+                None => {
+                    let _ = child.kill().await;
+                    self.start_reservations.write().await.remove(&active_key);
+                    return Err("Failed to open stderr for subprocess".into());
                 }
             };
             let stdin = Arc::new(tokio::sync::Mutex::new(raw_stdin));
@@ -608,11 +623,21 @@ impl SkillsManager {
                 let rtsp_url_clone = rtsp_url.clone();
                 let stdin_clone = stdin.clone();
 
-                let mut ffmpeg_cmd = Command::new("ffmpeg");
+                let mut ffmpeg_cmd = {
+                    let bundled_ffmpeg = self.root_dir.join(".data").join("bin").join("ffmpeg.exe");
+                    if bundled_ffmpeg.exists() {
+                        Command::new(bundled_ffmpeg)
+                    } else {
+                        Command::new("ffmpeg")
+                    }
+                };
+                
+                if rtsp_url_clone.starts_with("rtsp://") {
+                    ffmpeg_cmd.args(&["-rtsp_transport", "tcp"]);
+                }
+                
                 ffmpeg_cmd
                     .args(&[
-                        "-rtsp_transport",
-                        "tcp",
                         "-fflags",
                         "nobuffer",
                         "-flags",
@@ -716,9 +741,30 @@ impl SkillsManager {
             let camera_id_str = camera_id.clone();
             let recording_manager_clone = self.recording_manager.clone();
 
+            // Start threads to read stdout and stderr
+            let (tx_out, mut rx_out) = tokio::sync::mpsc::channel::<String>(100);
+            
+            // Read stdout
+            let tx_out_clone1 = tx_out.clone();
             tokio::spawn(async move {
-                let mut reader = BufReader::new(stdout).lines();
+                let mut reader = tokio::io::BufReader::new(stdout).lines();
                 while let Ok(Some(line)) = reader.next_line().await {
+                    let _ = tx_out_clone1.send(line).await;
+                }
+            });
+
+            // Read stderr
+            let tx_out_clone2 = tx_out.clone();
+            tokio::spawn(async move {
+                let mut reader = tokio::io::BufReader::new(stderr).lines();
+                while let Ok(Some(line)) = reader.next_line().await {
+                    let _ = tx_out_clone2.send(format!("ERR: {}", line)).await;
+                }
+            });
+
+            // Process output lines
+            tokio::spawn(async move {
+                while let Some(line) = rx_out.recv().await {
                     let trimmed = line.trim();
                     if trimmed.is_empty() {
                         continue;
@@ -966,7 +1012,49 @@ impl SkillsManager {
             });
         };
 
-        send_progress("start", "Initializing deployment environment...");
+        {
+            let mut res = self.deploy_reservations.write().await;
+            if !res.insert(skill_id.to_string()) {
+                send_progress("error", "Deployment is already running for this skill.");
+                return Err("Deployment already running".into());
+            }
+        }
+
+        let skill_id_clone_for_drop = skill_id.to_string();
+        let deploy_reservations = self.deploy_reservations.clone();
+        
+        let result = async {
+            send_progress("start", "Initializing deployment environment...");
+
+        // Clean up any incomplete previous deployment
+        if !skill_abs_path.join(".deployed").exists() {
+            let venv_path = skill_abs_path.join(".venv");
+            if venv_path.exists() {
+                if let Err(e) = tokio::fs::remove_dir_all(&venv_path).await {
+                    send_progress("progress", "Cleaning up locked files...");
+                    // If locked, attempt to kill any processes running inside this .venv
+                    if cfg!(target_os = "windows") {
+                        let path_match = format!("{}*", venv_path.to_string_lossy());
+                        let script = format!("Get-Process | Where-Object {{ $_.Path -like '{}' }} | Stop-Process -Force -ErrorAction SilentlyContinue", path_match.replace("\\", "\\\\"));
+                        let mut c = Command::new("powershell");
+                        let _ = c.args(&["-NoProfile", "-Command", &script]).output().await;
+                        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                    }
+                    if let Err(e2) = tokio::fs::remove_dir_all(&venv_path).await {
+                        send_progress("error", &format!("Failed to clear old .venv folder even after killing orphans. Please restart the app. ({})", e2));
+                        deploy_reservations.write().await.remove(&skill_id_clone_for_drop);
+                        return Err(format!("Cleanup failed: {}", e2).into());
+                    }
+                }
+            }
+            let node_path = skill_abs_path.join("node_modules");
+            if node_path.exists() {
+                if let Err(e) = tokio::fs::remove_dir_all(&node_path).await {
+                    send_progress("error", &format!("Failed to clear old node_modules folder. ({})", e));
+                    return Err(format!("Cleanup failed: {}", e).into());
+                }
+            }
+        }
 
         let mut child = if script_path.exists() {
             let mut cmd = if is_windows {
@@ -1097,11 +1185,20 @@ impl SkillsManager {
 
         let status = child.wait().await?;
         if status.success() {
+            let _ = tokio::fs::File::create(skill_abs_path.join(".deployed")).await;
             send_progress("complete", "Deployment completed successfully! Ready to start.");
+            Ok(())
         } else {
+            // Clean up unwanted things on failure
+            let _ = tokio::fs::remove_dir_all(skill_abs_path.join(".venv")).await;
+            let _ = tokio::fs::remove_dir_all(skill_abs_path.join("node_modules")).await;
+            let _ = tokio::fs::remove_file(skill_abs_path.join(".deployed")).await;
             send_progress("error", &format!("Deployment failed with exit status: {}", status));
+            Err("Deployment failed".into())
         }
+        }.await;
 
-        Ok(())
+        deploy_reservations.write().await.remove(&skill_id_clone_for_drop);
+        result
     }
 }

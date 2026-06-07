@@ -1,113 +1,150 @@
 <script lang="ts">
-  import * as Sidebar from "$lib/components/ui/sidebar/index.js";
-  import { page } from "$app/stores";
-  import { LayoutDashboard, Activity, Bell, FileText, Users, MessageSquareShare, Video, ActivitySquare, Settings } from "lucide-svelte";
-  import { cn } from "$lib/utils.js";
-  import { useSidebar } from "$lib/components/ui/sidebar/context.svelte.js";
-  
-  let { chatOpen = $bindable() } = $props();
-  const sidebar = useSidebar();
+    import { page } from '$app/stores';
+    import { cn } from '$lib/utils';
 
-  const navItems = [
-    { href: '/', label: 'Overview', icon: LayoutDashboard },
-    { href: '/monitoring', label: 'Live Grid', icon: Activity },
-    { href: '/events', label: 'Event Detections', icon: Bell },
-    { href: '/review', label: 'Review Center', icon: FileText },
-    { href: '/identities', label: 'Face Re-ID Database', icon: Users },
-    { href: '/chat', label: 'Security Chat', icon: MessageSquareShare },
-    { href: '/cameras', label: 'Cameras Config', icon: Video },
-    { href: '/system', label: 'System Diagnostics', icon: ActivitySquare },
-    { href: '/settings', label: 'System Config', icon: Settings }
-  ];
+    let { chatOpen = $bindable() } = $props();
+
+    const navItems = [
+        {
+            group: 'Operations',
+            items: [
+                { href: '/', label: 'Overview', glyph: 'overview' },
+                { href: '/monitoring', label: 'Live Grid', glyph: 'monitor' },
+                { href: '/events', label: 'Events', glyph: 'events' }
+            ]
+        },
+        {
+            group: 'Intelligence',
+            items: [
+                { href: '/review', label: 'Review', glyph: 'review' },
+                { href: '/identities', label: 'Identities', glyph: 'identities' },
+                { href: '/chat', label: 'Agent Chat', glyph: 'chat' }
+            ]
+        },
+        {
+            group: 'Platform',
+            items: [
+                { href: '/cameras', label: 'Cameras', glyph: 'cameras' },
+                { href: '/system', label: 'Diagnostics', glyph: 'system' },
+                { href: '/settings', label: 'Settings', glyph: 'settings' }
+            ]
+        }
+    ];
+
+    function isActive(href: string, pathname: string) {
+        if (href === '/') return pathname === '/';
+        return pathname === href || pathname.startsWith(href + '/');
+    }
 </script>
 
-<Sidebar.Root collapsible="icon">
-  <Sidebar.Header class={sidebar.state === "expanded" ? "py-3 px-3" : "py-3 flex justify-center"}>
-    <Sidebar.Menu>
-      <Sidebar.MenuItem>
-        <Sidebar.MenuButton size="lg" class="hover:bg-transparent! active:bg-transparent! flex items-center justify-center">
-          <!-- Custom Hawkeye Brand Eye -->
-          <div class="relative flex aspect-square size-8 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-950/60 to-slate-900 border border-indigo-500/25 shadow-md shadow-indigo-950/40 overflow-hidden group/eye shrink-0">
-            <!-- Animated radial scanner pulse -->
-            <div class="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(99,102,241,0.2)_0%,transparent_75%)]"></div>
-            
-            <svg viewBox="0 0 24 24" class="size-5 text-indigo-400 drop-shadow-[0_0_6px_rgba(99,102,241,0.65)] group-hover/eye:text-indigo-300 transition-colors duration-300" fill="none" stroke="currentColor" stroke-width="2">
-              <!-- Stylized Cyber Eye contour -->
-              <path d="M2 12C2 12 5.63636 5 12 5C18.3636 5 22 12 22 12C22 12 18.3636 19 12 19C5.63636 19 2 12 2 12Z" stroke-linecap="round" stroke-linejoin="round" />
-              <!-- Radar Dotted ring -->
-              <circle cx="12" cy="12" r="4.5" stroke="currentColor" stroke-dasharray="3 2" class="opacity-60 animate-[spin_20s_linear_infinite]" />
-              <!-- Central Pupil -->
-              <circle cx="12" cy="12" r="2" fill="currentColor" class="text-indigo-400" />
-              <!-- Glint -->
-              <circle cx="13.2" cy="10.8" r="0.6" fill="white" class="opacity-90" />
+<aside class="hidden md:flex w-[232px] shrink-0 flex-col border-r border-border bg-card/40 backdrop-blur-sm h-screen sticky top-0">
+    <!-- Brand -->
+    <div class="h-14 px-4 flex items-center gap-2.5 border-b border-border shrink-0">
+        <div class="relative w-8 h-8 rounded-lg overflow-hidden bg-gradient-to-br from-[#0e1a26] to-[#061018] border border-cyan/30 shrink-0">
+            <div class="absolute inset-0 bg-[radial-gradient(circle_at_30%_30%,hsl(var(--cyan)/0.4)_0%,transparent_60%)]"></div>
+            <svg viewBox="0 0 24 24" class="absolute inset-0 w-full h-full p-1.5 text-cyan drop-shadow-[0_0_4px_hsl(var(--cyan)/0.6)]" fill="none" stroke="currentColor" stroke-width="1.8">
+                <path d="M2 12C2 12 5.63636 5 12 5C18.3636 5 22 12 22 12C22 12 18.3636 19 12 19C5.63636 19 2 12 2 12Z" stroke-linecap="round" stroke-linejoin="round"/>
+                <circle cx="12" cy="12" r="4.5" stroke="currentColor" stroke-dasharray="3 2" class="opacity-70" style="transform-origin: 12px 12px; animation: spin 20s linear infinite;"/>
+                <circle cx="12" cy="12" r="1.8" fill="currentColor"/>
+                <circle cx="13.2" cy="10.8" r="0.5" fill="white" class="opacity-90"/>
             </svg>
-          </div>
-          <div class="grid flex-1 text-left text-sm leading-tight ml-2 group-data-[collapsible=icon]:hidden">
-            <span class="truncate font-bold bg-gradient-to-r from-indigo-100 to-indigo-300 bg-clip-text text-transparent font-display tracking-wide">HAWKEYE</span>
-            <span class="truncate text-[10px] text-muted-foreground font-mono uppercase tracking-wider font-semibold">Security AI</span>
-          </div>
-        </Sidebar.MenuButton>
-      </Sidebar.MenuItem>
-    </Sidebar.Menu>
-  </Sidebar.Header>
-  <Sidebar.Content>
-    <Sidebar.Group>
-      <Sidebar.GroupLabel class="px-4 text-[9px] uppercase tracking-widest font-bold text-muted-foreground/60 select-none">Platform</Sidebar.GroupLabel>
-      <Sidebar.Menu>
-        {#each navItems as item}
-          {@const isActive = $page.url.pathname === item.href || ($page.url.pathname.startsWith(item.href) && item.href !== '/')}
-          {@const Icon = item.icon}
-          <Sidebar.MenuItem class={sidebar.state === "expanded" ? "px-2 my-0.5" : "px-0 my-0.5"}>
-            <Sidebar.MenuButton 
-              isActive={isActive} 
-              tooltipContent={item.label}
-              class="rounded-full px-4 h-9.5 border border-transparent transition-all duration-200
-                     data-[active=true]:bg-indigo-500/10 data-[active=true]:border-indigo-500/20 data-[active=true]:text-indigo-400 data-[active=true]:shadow-[inset_0_1.5px_0_rgba(255,255,255,0.06),0_2px_8px_-1px_rgba(99,102,241,0.18)]
-                     hover:rounded-full hover:bg-muted/50 hover:text-foreground
-                     data-[active=true]:hover:bg-indigo-500/15 data-[active=true]:hover:text-indigo-300"
-            >
-              {#snippet child({ props }: { props: any })}
-                <a href={item.href} {...props} class={cn("flex items-center gap-3 w-full h-full justify-start group-data-[collapsible=icon]:justify-center", props.class)}>
-                  <Icon class="size-4 shrink-0 transition-transform duration-200 group-hover/menu-button:scale-110" />
-                  <span class="text-xs font-semibold tracking-wide font-sans group-data-[collapsible=icon]:hidden">{item.label}</span>
-                </a>
-              {/snippet}
-            </Sidebar.MenuButton>
-          </Sidebar.MenuItem>
+        </div>
+        <div class="min-w-0">
+            <p class="text-sm font-bold font-display tracking-tight text-foreground leading-none">HAWKEYE</p>
+            <p class="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold mt-0.5 leading-none">Mission Control</p>
+        </div>
+    </div>
+
+    <!-- Nav -->
+    <nav class="flex-1 overflow-y-auto p-3 flex flex-col gap-5">
+        {#each navItems as group}
+            <div class="flex flex-col gap-1.5">
+                <p class="px-2.5 text-[10px] font-bold uppercase tracking-[0.15em] text-muted-foreground/60">{group.group}</p>
+                {#each group.items as item}
+                    {@const active = isActive(item.href, $page.url.pathname)}
+                    <a
+                        href={item.href}
+                        class={cn(
+                            "group relative flex items-center gap-2.5 h-9 px-2.5 rounded-lg text-xs font-semibold transition-all duration-200",
+                            active
+                                ? "bg-cyan/10 text-cyan"
+                                : "text-muted-foreground hover:text-foreground hover:bg-card-hover"
+                        )}
+                    >
+                        {#if active}
+                            <span class="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-cyan rounded-r-full shadow-[0_0_8px_hsl(var(--cyan)/0.6)]"></span>
+                        {/if}
+
+                        <!-- Icon glyphs -->
+                        {#if item.glyph === 'overview'}
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/>
+                                <rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/>
+                            </svg>
+                        {:else if item.glyph === 'monitor'}
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
+                            </svg>
+                        {:else if item.glyph === 'events'}
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/>
+                                <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>
+                            </svg>
+                        {:else if item.glyph === 'review'}
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+                            </svg>
+                        {:else if item.glyph === 'identities'}
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                                <circle cx="12" cy="7" r="4"/>
+                            </svg>
+                        {:else if item.glyph === 'chat'}
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                            </svg>
+                        {:else if item.glyph === 'cameras'}
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                                <circle cx="12" cy="13" r="4"/>
+                            </svg>
+                        {:else if item.glyph === 'system'}
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
+                            </svg>
+                        {:else if item.glyph === 'settings'}
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <circle cx="12" cy="12" r="3"/>
+                                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                            </svg>
+                        {/if}
+
+                        <span>{item.label}</span>
+                    </a>
+                {/each}
+            </div>
         {/each}
-      </Sidebar.Menu>
-    </Sidebar.Group>
-  </Sidebar.Content>
-  <Sidebar.Footer>
-    <Sidebar.Menu>
-      <Sidebar.MenuItem class={sidebar.state === "expanded" ? "px-2 my-2" : "px-0 my-2"}>
-        <!-- The global Ask Hawkeye AI Chat Sidebar Item -->
-        <Sidebar.MenuButton 
-          tooltipContent="Security Assistant" 
-          onclick={() => chatOpen = !chatOpen}
-          class="rounded-full px-4 h-9.5 border border-indigo-500/15 bg-indigo-950/20 text-indigo-400 hover:bg-indigo-950/35 hover:border-indigo-500/30 hover:text-indigo-300 hover:rounded-full shadow-sm transition-all duration-300"
-        >
-          {#snippet child({ props }: { props: any })}
-             <button {...props} class={cn("w-full flex items-center gap-3 justify-start group-data-[collapsible=icon]:justify-center", props.class)}>
-               <!-- Custom AI Chat Symbol -->
-               <div class="relative flex items-center justify-center shrink-0">
-                 <svg viewBox="0 0 24 24" class="size-4 text-indigo-400 drop-shadow-[0_0_3px_rgba(99,102,241,0.55)] transition-colors duration-300" fill="none" stroke="currentColor" stroke-width="2">
-                   <!-- Rounded Chat Bubble -->
-                   <path d="M21 11.5C21 15.642 16.97 19 12 19C10.237 19 8.601 18.423 7.25 17.425L3 19L4.35 15.175C3.13 14.12 2.38 12.631 2.38 11C2.38 6.858 6.41 3.5 11.38 3.5C16.35 3.5 20.38 6.858 20.38 11" stroke-linecap="round" stroke-linejoin="round" class="opacity-90" />
-                   <!-- Sparkle 1 -->
-                   <path d="M9.5 8c0 0.414-0.336 0.75-0.75 0.75c0.414 0 0.75 0.336 0.75 0.75c0-0.414 0.336-0.75 0.75-0.75c-0.414 0-0.75-0.336-0.75-0.75Z" fill="currentColor" stroke="none" />
-                   <!-- Sparkle 2 -->
-                   <path d="M14.5 11.5c0 0.69-0.56 1.25-1.25 1.25c0.69 0 1.25 0.56 1.25 1.25c0-0.69 0.56-1.25 1.25-1.25c-0.69 0-1.25-0.56-1.25-1.25Z" fill="currentColor" stroke="none" />
-                 </svg>
-                 <!-- Pulsing indigo active dot in corner -->
-                 <span class="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-indigo-500 shadow-[0_0_4px_#6366f1] animate-pulse"></span>
-               </div>
-               <span class="text-xs font-bold font-sans tracking-wide group-data-[collapsible=icon]:hidden">Ask Assistant</span>
-             </button>
-          {/snippet}
-        </Sidebar.MenuButton>
-      </Sidebar.MenuItem>
-    </Sidebar.Menu>
-  </Sidebar.Footer>
-  <Sidebar.Rail />
-</Sidebar.Root>
+    </nav>
+
+    <!-- Bottom: system status -->
+    <div class="p-3 border-t border-border shrink-0">
+        <div class="rounded-lg bg-surface-2 border border-border p-3 flex flex-col gap-2">
+            <div class="flex items-center justify-between">
+                <p class="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Engine</p>
+                <span class="badge badge-jade !h-4 !text-[9px]">
+                    <span class="w-1 h-1 rounded-full bg-jade status-pulse"></span>
+                    Active
+                </span>
+            </div>
+            <p class="text-[11px] text-muted-foreground leading-snug">
+                <span class="font-mono font-semibold text-foreground">v0.4.2</span> · perception-core
+            </p>
+            <div class="flex items-center gap-1.5 mt-1">
+                <div class="flex-1 h-1 rounded-full bg-muted overflow-hidden">
+                    <div class="h-full bg-gradient-to-r from-cyan to-iris rounded-full" style="width: 78%"></div>
+                </div>
+                <span class="text-[10px] font-mono font-bold text-muted-foreground">78%</span>
+            </div>
+        </div>
+    </div>
+</aside>

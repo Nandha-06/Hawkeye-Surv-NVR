@@ -43,7 +43,6 @@ flowchart TB
     subgraph Skills["Hawkeye Skills"]
         PCORE["perception-core"]
         RFD["rf-detr-detection-segmentation"]
-        VEA["visual-event-analyzer"]
     end
 
     subgraph Backends["Hardware Backends"]
@@ -65,7 +64,6 @@ flowchart TB
     GOV --> PROTO
     PROTO --> PCORE
     PROTO --> RFD
-    PROTO --> VEA
 
     PCORE --> ENV
     RFD --> HF["Hugging Face Transformers"]
@@ -78,7 +76,6 @@ flowchart TB
 
     PCORE --> |"stdout: detections"| API
     RFD --> |"stdout: detections"| API
-    VEA --> |"stdout: analysis"| API
 ```
 
 ---
@@ -91,7 +88,6 @@ Each skill is a self-contained module with its own model, parameters, and [commu
 |----------|-------|--------------|
 | **Detection** | [`perception-core`](skills/detection/perception-core/) | Unified perception pipeline — YOLO object detection + ByteTrack tracking + ROI face detection + face recognition, with auto-accelerated backends (TensorRT / CoreML / OpenVINO / ONNX) |
 | | [`rf-detr-detection-segmentation`](skills/detection/rf-detr-detection-segmentation/) | RF-DETR detection + instance segmentation via Hugging Face Transformers |
-| **Analysis** | [`visual-event-analyzer`](skills/analysis/visual-event-analyzer/) | Event-driven VLM scene summaries, threat policy analysis, natural-language alerts |
 | **Camera Providers** | [`eufy`](skills/camera-providers/eufy/) · [`reolink`](skills/camera-providers/reolink/) · [`tapo`](skills/camera-providers/tapo/) | Vendor camera integrations — local RTSP / ONVIF discovery / clip retrieval |
 | **Streaming** | [`go2rtc-cameras`](skills/streaming/go2rtc-cameras/) | Registers RTSP streams with go2rtc for low-latency WebRTC live views |
 | **Channels** | [`telegram`](skillsfriend/channels/telegram/) · [`signal`](skills/channels/signal/) · [`matrix`](skills/channels/matrix/) · [`line`](skills/channels/line/) | Messaging channels for the agent — alerts, search, control |

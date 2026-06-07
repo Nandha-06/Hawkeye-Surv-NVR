@@ -160,8 +160,23 @@ class _OnnxCoreMLModel:
 
         # Run inference
         outputs = self.session.run(None, {self._input_name: blob})
-        logits = outputs[0][0]      # [300, 80] raw class logits
-        pred_boxes = outputs[1][0]  # [300, 4]  cx, cy, w, h (normalized 0..1)
+        
+        # Handle ultralytics single-tensor output (shape: [1, 84, 8400])
+        if len(outputs) == 1:
+            # outputs[0] shape: [1, 84, 8400] for YOLOv8 (4 box + 80 class)
+            tensor = outputs[0][0] # [84, 8400]
+            # Transpose to [8400, 84] to separate boxes and logits
+            tensor = tensor.transpose(1, 0)
+            pred_boxes = tensor[:, :4] # cx, cy, w, h
+            logits = tensor[:, 4:]     # 80 class logits
+            # Normalize boxes to 0..1 based on input shape
+            pred_boxes[:, 0] /= self._input_w
+            pred_boxes[:, 1] /= self._input_h
+            pred_boxes[:, 2] /= self._input_w
+            pred_boxes[:, 3] /= self._input_h
+        else:
+            logits = outputs[0][0]      # [300, 80] raw class logits
+            pred_boxes = outputs[1][0]  # [300, 4]  cx, cy, w, h (normalized 0..1)
 
         # Sigmoid → class probabilities
         probs = 1.0 / (1.0 + np.exp(-logits))

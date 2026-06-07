@@ -102,6 +102,12 @@ if not exist "%VENV_DIR%\Scripts\python.exe" (
 set "PIP=%VENV_DIR%\Scripts\pip.exe"
 set "VPYTHON=%VENV_DIR%\Scripts\python.exe"
 
+"%VPYTHON%" -m pip --version >nul 2>&1
+if !errorlevel! neq 0 (
+    echo {"event":"progress","stage":"venv","message":"Bootstrapping pip..."}
+    "%VPYTHON%" -m ensurepip --upgrade >nul 2>&1
+)
+
 "%PIP%" install --upgrade pip -q >nul 2>&1
 
 echo {"event": "progress", "stage": "venv", "message": "Virtual environment ready"}

@@ -20,79 +20,7 @@ fn parse_time_ms(value: &str) -> Option<i64> {
 
 }
 
-async fn get_keyframe_before(filepath: &std::path::Path, offset_sec: f64) -> Option<f64> {
-
-    let output = tokio::process::Command::new("ffprobe")
-
-        .arg("-select_streams")
-
-        .arg("v:0")
-
-        .arg("-show_entries")
-
-        .arg("packet=pts_time,flags")
-
-        .arg("-of")
-
-        .arg("csv=p=0")
-
-        .arg("-loglevel")
-
-        .arg("error")
-
-        .arg(filepath)
-
-        .output()
-
-        .await
-
-        .ok()?;
-
-    if !output.status.success() {
-
-        return None;
-
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-
-    let mut best = None;
-
-    for line in stdout.lines() {
-
-        let parts: Vec<&str> = line.split(',').collect();
-
-        if parts.len() < 2 || !parts.iter().any(|part| part.contains('K')) {
-
-            continue;
-
-        }
-
-        let ts = parts
-
-            .iter()
-
-            .find_map(|part| part.trim().parse::<f64>().ok());
-
-        if let Some(ts) = ts {
-
-            if ts <= offset_sec {
-
-                best = Some(ts);
-
-            } else {
-
-                break;
-
-            }
-
-        }
-
-    }
-
-    best
-
-}
+// Keyframe function removed as part of VOD TS optimization
 
 pub async fn get_vod_playlist(
 
@@ -186,7 +114,7 @@ pub async fn get_vod_playlist(
 
     };
 
-    let req_end_ms = match parse_time_ms(&params.end_time) {
+    let _req_end_ms = match parse_time_ms(&params.end_time) {
 
         Some(v) => v,
 
@@ -208,7 +136,9 @@ pub async fn get_vod_playlist(
 
     let mut max_duration = 5.0f64;
 
-    for (id, start, end, filepath) in list {
+    let mut first_start_ms: Option<i64> = None;
+
+    for (id, start, end, _filepath) in list {
 
         let Some(seg_start_ms) = parse_time_ms(&start) else {
 
@@ -222,37 +152,11 @@ pub async fn get_vod_playlist(
 
         };
 
-        let overlap_start_ms = std::cmp::max(seg_start_ms, req_start_ms);
-
-        let overlap_end_ms = std::cmp::min(seg_end_ms, req_end_ms);
-
-        if overlap_end_ms <= overlap_start_ms {
-
-            continue;
-
+        if first_start_ms.is_none() {
+            first_start_ms = Some(seg_start_ms);
         }
 
-        let mut seek_start = None;
-
-        let mut duration = (overlap_end_ms - overlap_start_ms) as f64 / 1000.0;
-
-        if req_start_ms > seg_start_ms {
-
-            let requested_offset = (req_start_ms - seg_start_ms) as f64 / 1000.0;
-
-            let keyframe_offset = get_keyframe_before(&PathBuf::from(&filepath), requested_offset)
-
-                .await
-
-                .unwrap_or(requested_offset);
-
-            let gained = requested_offset - keyframe_offset;
-
-            seek_start = Some(keyframe_offset);
-
-            duration += gained.max(0.0);
-
-        }
+        let duration = (seg_end_ms - seg_start_ms) as f64 / 1000.0;
 
         if duration < 0.1 {
 
@@ -267,8 +171,6 @@ pub async fn get_vod_playlist(
             id,
 
             duration,
-
-            seek_start,
 
         });
 
@@ -294,25 +196,19 @@ pub async fn get_vod_playlist(
 
     );
 
+    // Add START offset if requested start is inside the first segment
+    if let Some(first_seg_start) = first_start_ms {
+        if req_start_ms > first_seg_start {
+            let offset = (req_start_ms - first_seg_start) as f64 / 1000.0;
+            playlist.push_str(&format!("#EXT-X-START:TIME-OFFSET={:.3}\n", offset));
+        }
+    }
+
     for (idx, item) in items.iter().enumerate() {
 
         playlist.push_str(&format!("#EXTINF:{:.3},\n", item.duration));
 
-        let mut segment_url = format!("/api/v1/recordings/vod/segment/{}", item.id);
-
-        let mut query = Vec::new();
-
-        if let Some(ss) = item.seek_start {
-
-            query.push(format!("ss={:.3}", ss));
-
-        }
-
-        query.push(format!("t={:.3}", item.duration));
-
-        segment_url.push('?');
-
-        segment_url.push_str(&query.join("&"));
+        let segment_url = format!("/api/v1/recordings/vod/segment/{}", item.id);
 
         playlist.push_str(&segment_url);
 
@@ -407,6 +303,27 @@ pub async fn get_vod_segment(
         let file_path = PathBuf::from(&path_str);
 
         if file_path.exists() {
+            let is_ts = file_path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .map(|ext| ext.eq_ignore_ascii_case("ts"))
+                .unwrap_or(false);
+
+            if is_ts && params.ss.is_none() && params.t.is_none() {
+                let file = match tokio::fs::File::open(&file_path).await {
+                    Ok(f) => f,
+                    Err(_) => return Response::builder()
+                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                        .body(Body::from("Failed to open TS segment"))
+                        .unwrap(),
+                };
+                let stream = tokio_util::io::ReaderStream::new(file);
+                return Response::builder()
+                    .header(header::CONTENT_TYPE, "video/mp2t")
+                    .header(header::CACHE_CONTROL, "public, max-age=86400")
+                    .body(Body::from_stream(stream))
+                    .unwrap();
+            }
 
             let is_webm = file_path
 

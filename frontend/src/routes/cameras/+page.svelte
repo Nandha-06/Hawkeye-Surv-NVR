@@ -1,6 +1,6 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
-    import { slide } from 'svelte/transition';
+    import { slide, fly, fade } from 'svelte/transition';
 
     interface CameraConfig {
         id: string;
@@ -19,18 +19,16 @@
     let cameras = $state<CameraConfig[]>([]);
     let isSaving = $state(false);
     let message = $state('');
-    let messageType = $state<'success' | 'error' | ''>('');
+    let messageType = $state<'success' | 'error' | 'info' | ''>('');
 
-    // Toggle advanced configuration panel per camera card
     let expandedCameraSettings = $state<Record<string, boolean>>({});
 
-    // Motion Gating & Alert Zone Polygon Editor state
     let activeEditorCamera = $state<CameraConfig | null>(null);
     let drawingPoints = $state<[number, number][]>([]);
     let cursorX = $state(0);
     let cursorY = $state(0);
     let svgElement = $state<SVGElement | null>(null);
-    let drawingMode = $state<'mask' | 'zone'>('mask'); // 'mask' = exclusion mask, 'zone' = alert zone
+    let drawingMode = $state<'mask' | 'zone'>('mask');
 
     let editorStream = $state<MediaStream | null>(null);
 
@@ -96,7 +94,7 @@
             const dx = x - firstPt[0];
             const dy = y - firstPt[1];
             const dist = Math.sqrt(dx * dx + dy * dy);
-            if (dist < 0.03) { // 3% proximity
+            if (dist < 0.03) {
                 closePolygon();
                 return;
             }
@@ -165,7 +163,6 @@
         drawingPoints = [];
     }
 
-    // Form state for creating a new camera
     let newCamName = $state('');
     let newCamSource = $state<'rtsp' | 'webcam'>('webcam');
     let newCamUrl = $state('');
@@ -190,7 +187,7 @@
 
     onMount(fetchCameras);
 
-    function showNotification(msg: string, type: 'success' | 'error') {
+    function showNotification(msg: string, type: 'success' | 'error' | 'info') {
         message = msg;
         messageType = type;
         setTimeout(() => {
@@ -209,7 +206,7 @@
             });
             const data = await res.json();
             if (res.ok && data.success) {
-                showNotification('Camera configurations saved successfully! Restart AI Engine to apply.', 'success');
+                showNotification('Camera configurations saved. Restart AI Engine to apply.', 'success');
             } else {
                 showNotification(data.error || 'Failed to persist camera configurations', 'error');
             }
@@ -251,7 +248,6 @@
 
         cameras = [...cameras, newCamera];
 
-        // Reset form
         newCamName = '';
         newCamSource = 'webcam';
         newCamUrl = '';
@@ -271,999 +267,601 @@
     onDestroy(() => {
         stopWebcam();
     });
+
+    let cameraStats = $derived({
+        total: cameras.length,
+        enabled: cameras.filter(c => c.enabled).length,
+        rtsp: cameras.filter(c => c.source === 'rtsp').length,
+        webcam: cameras.filter(c => c.source === 'webcam').length
+    });
 </script>
 
-<div class="cameras-layout">
-    <!-- Notifications -->
+<div class="flex flex-col gap-6 w-full pb-12 page-enter">
+
+    <!-- Notification toast -->
     {#if message}
-        <div class="notification-pill {messageType}">
-            <div class="pill-glow"></div>
-            <span>{message}</span>
+        <div class="fixed bottom-6 right-6 z-[100] max-w-sm" transition:fly={{ y: 20, duration: 200 }}>
+            <div class="px-4 py-3 rounded-xl border backdrop-blur-md flex items-center gap-3
+                {messageType === 'success' ? 'bg-jade/10 border-jade/30' : ''}
+                {messageType === 'error' ? 'bg-crimson/10 border-crimson/30' : ''}
+                {messageType === 'info' ? 'bg-cyan/10 border-cyan/30' : ''}">
+                <span class="w-2 h-2 rounded-full"
+                    class:bg-jade={messageType === 'success'}
+                    class:bg-crimson={messageType === 'error'}
+                    class:bg-cyan={messageType === 'info'}></span>
+                <span class="text-xs font-semibold text-foreground">{message}</span>
+            </div>
         </div>
     {/if}
 
-    <header class="cameras-header flex items-center justify-between">
-        <div class="header-left">
-            <h1>📷 Camera Channels</h1>
-            <p class="subtitle">Configure and register local hardware inputs and remote RTSP streams</p>
+    <!-- Header -->
+    <header class="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
+        <div>
+            <div class="flex items-center gap-2.5 mb-2">
+                <span class="badge badge-cyan">
+                    <span class="w-1.5 h-1.5 rounded-full bg-cyan status-pulse"></span>
+                    Input Channels
+                </span>
+                <span class="text-[11px] text-muted-foreground font-mono">{cameraStats.enabled} of {cameraStats.total} active</span>
+            </div>
+            <h1 class="text-2xl md:text-3xl font-display font-bold text-foreground tracking-tight leading-none">Camera Channels</h1>
+            <p class="text-sm text-muted-foreground mt-2">Register local hardware inputs and remote RTSP streams into the perception pipeline.</p>
         </div>
-        
-        <div class="actions-group flex gap-3">
-            <button onclick={() => showAddForm = !showAddForm} class="glass-btn">
+
+        <div class="flex items-center gap-2 flex-wrap">
+            <div class="flex items-center gap-1.5 px-3 h-9 rounded-lg border border-border bg-card">
+                <span class="text-[10px] font-mono font-bold text-foreground tabular-nums">{cameraStats.total}</span>
+                <span class="text-[10px] text-muted-foreground uppercase tracking-wider">channels</span>
+            </div>
+            <div class="flex items-center gap-1.5 px-3 h-9 rounded-lg border border-jade/20 bg-jade/5">
+                <span class="w-1.5 h-1.5 rounded-full bg-jade"></span>
+                <span class="text-[10px] font-mono font-bold text-foreground tabular-nums">{cameraStats.enabled}</span>
+                <span class="text-[10px] text-muted-foreground uppercase tracking-wider">live</span>
+            </div>
+            <div class="flex items-center gap-1.5 px-3 h-9 rounded-lg border border-border bg-card">
+                <span class="text-[10px] font-mono font-bold text-foreground tabular-nums">{cameraStats.rtsp}</span>
+                <span class="text-[10px] text-muted-foreground uppercase tracking-wider">rtsp</span>
+            </div>
+            <div class="flex items-center gap-1.5 px-3 h-9 rounded-lg border border-border bg-card">
+                <span class="text-[10px] font-mono font-bold text-foreground tabular-nums">{cameraStats.webcam}</span>
+                <span class="text-[10px] text-muted-foreground uppercase tracking-wider">usb</span>
+            </div>
+            <button onclick={() => showAddForm = !showAddForm} class="btn btn-iris btn-sm">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+                </svg>
                 Add Channel
             </button>
-            <button onclick={saveCameras} disabled={isSaving} class="glass-btn primary">
+            <button onclick={saveCameras} disabled={isSaving} class="btn btn-primary btn-sm">
                 {#if isSaving}
-                    Saving...
+                    <span class="w-3 h-3 rounded-full border-2 border-current border-t-transparent animate-spin"></span>
+                    Saving…
                 {:else}
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+                        <polyline points="17 21 17 13 7 13 7 21"/>
+                        <polyline points="7 3 7 8 15 8"/>
+                    </svg>
                     Save Changes
                 {/if}
             </button>
         </div>
     </header>
 
+    <!-- Add form -->
     {#if showAddForm}
-        <section class="add-camera-panel glass-panel" transition:slide>
-            <h3>Register New Stream Input</h3>
-            <div class="grid-form p-4">
-                <div class="form-group">
-                    <label for="name">Friendly Name</label>
-                    <input id="name" type="text" bind:value={newCamName} placeholder="e.g. Front Porch Camera" />
+        <section class="panel" transition:slide={{ duration: 200 }}>
+            <div class="panel-header">
+                <div class="flex items-center gap-2.5">
+                    <div class="w-8 h-8 rounded-lg bg-iris/10 border border-iris/20 flex items-center justify-center text-iris">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+                        </svg>
+                    </div>
+                    <div>
+                        <h2 class="text-sm font-display font-semibold text-foreground">Register New Stream Input</h2>
+                        <p class="text-[10px] text-muted-foreground font-mono">Append a new channel to the perception network</p>
+                    </div>
                 </div>
-                
-                <div class="form-group">
-                    <label for="source">Source Stream Type</label>
-                    <select id="source" bind:value={newCamSource}>
-                        <option value="webcam">Local Webcam (WebRTC/USB)</option>
-                        <option value="rtsp">Remote IP Stream (RTSP Link)</option>
-                    </select>
+                <button type="button" onclick={() => showAddForm = false} class="btn-icon !w-8 !h-8" aria-label="Close register form">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                </button>
+            </div>
+
+            <div class="panel-body">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="flex flex-col gap-1.5">
+                        <label for="name" class="section-eyebrow">Friendly Name</label>
+                        <input id="name" type="text" bind:value={newCamName} placeholder="e.g. Front Porch Camera" class="input" />
+                    </div>
+
+                    <div class="flex flex-col gap-1.5">
+                        <label for="source" class="section-eyebrow">Source Stream Type</label>
+                        <select id="source" bind:value={newCamSource} class="select">
+                            <option value="webcam">Local Webcam (WebRTC/USB)</option>
+                            <option value="rtsp">Remote IP Stream (RTSP Link)</option>
+                        </select>
+                    </div>
+
+                    {#if newCamSource === 'rtsp'}
+                        <div class="flex flex-col gap-1.5 md:col-span-2">
+                            <label for="url" class="section-eyebrow">RTSP Address (High-Res Record)</label>
+                            <input id="url" type="text" bind:value={newCamUrl} placeholder="rtsp://username:password@192.168.1.100:554/live" class="input font-mono text-[11px]" />
+                        </div>
+                        <div class="flex flex-col gap-1.5 md:col-span-2">
+                            <label for="detect_url" class="section-eyebrow">RTSP Sub-Stream (Low-Res AI, Optional)</label>
+                            <input id="detect_url" type="text" bind:value={newCamDetectUrl} placeholder="rtsp://username:password@192.168.1.100:554/substream" class="input font-mono text-[11px]" />
+                        </div>
+                    {/if}
                 </div>
 
-                {#if newCamSource === 'rtsp'}
-                    <div class="form-group">
-                        <label for="url">RTSP Address (High-Res Record)</label>
-                        <input id="url" type="text" bind:value={newCamUrl} placeholder="rtsp://username:password@192.168.1.100:554/live" />
-                    </div>
-                    <div class="form-group">
-                        <label for="detect_url">RTSP Sub-Stream (Low-Res AI, Optional)</label>
-                        <input id="detect_url" type="text" bind:value={newCamDetectUrl} placeholder="rtsp://username:password@192.168.1.100:554/substream" />
-                    </div>
-                {/if}
-
-                <div class="form-group span-2 flex justify-end gap-3 mt-3">
-                    <button onclick={() => showAddForm = false} class="glass-btn">Cancel</button>
-                    <button onclick={addCamera} class="glass-btn primary">Append Channel</button>
+                <div class="flex justify-end gap-2 pt-4 mt-2 border-t border-border">
+                    <button onclick={() => showAddForm = false} class="btn btn-ghost btn-sm">Cancel</button>
+                    <button onclick={addCamera} class="btn btn-iris btn-sm">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M12 5v14M5 12h14"/>
+                        </svg>
+                        Append Channel
+                    </button>
                 </div>
             </div>
         </section>
     {/if}
 
-    <section class="cameras-stack">
-        {#if cameras.length === 0}
-            <div class="empty-state text-center p-8 glass-panel">
-                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="muted-icon mx-auto mb-2">
-                    <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
-                    <circle cx="12" cy="13" r="4"></circle>
+    <!-- Camera grid -->
+    {#if cameras.length === 0}
+        <div class="flex flex-col items-center justify-center text-center border border-dashed border-border rounded-2xl p-12 min-h-[420px]">
+            <div class="w-16 h-16 rounded-2xl bg-surface-2 border border-border flex items-center justify-center text-muted-foreground mb-4">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="text-muted-foreground/60">
+                    <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                    <circle cx="12" cy="13" r="4"/>
                 </svg>
-                <h3>No Cameras Registered</h3>
-                <p>Register local cameras or remote RTSP connections above to build your security network.</p>
             </div>
-        {:else}
-            <div class="cameras-grid">
-                {#each cameras as camera}
-                    <div class="camera-card glass-panel" class:disabled={!camera.enabled}>
-                        <!-- Card Header -->
-                        <div class="card-header">
-                            <div class="flex items-center gap-2">
-                                <div class="status-dot" class:enabled={camera.enabled}></div>
-                                <h3 class="camera-name">{camera.name}</h3>
+            <h3 class="text-base font-display font-semibold text-foreground">No cameras registered</h3>
+            <p class="text-xs text-muted-foreground mt-1 max-w-sm">Register local hardware or remote RTSP connections to build the security network.</p>
+            <button onclick={() => showAddForm = true} class="btn btn-primary btn-sm mt-4">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+                </svg>
+                Register First Channel
+            </button>
+        </div>
+    {:else}
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {#each cameras as camera (camera.id)}
+                <div class="panel !p-0 overflow-hidden transition-all"
+                    class:opacity-60={!camera.enabled}>
+
+                    <!-- Status accent stripe -->
+                    <div class="h-1 w-full transition-colors"
+                        class:bg-jade={camera.enabled}
+                        class:bg-muted={!camera.enabled}></div>
+
+                    <div class="p-4 flex flex-col gap-4">
+                        <!-- Header: status + name + actions -->
+                        <div class="flex items-start justify-between gap-3">
+                            <div class="min-w-0 flex-1">
+                                <div class="flex items-center gap-2 mb-1.5">
+                                    <span class="w-1.5 h-1.5 rounded-full {camera.enabled ? 'bg-jade status-pulse' : 'bg-muted-foreground'}"></span>
+                                    <span class="text-[10px] font-mono font-bold text-muted-foreground uppercase tracking-wider">{camera.enabled ? 'ONLINE' : 'STANDBY'}</span>
+                                    <span class="text-[10px] font-mono text-muted-foreground/60">·</span>
+                                    <span class="text-[10px] font-mono text-muted-foreground uppercase tracking-wider">{camera.source}</span>
+                                </div>
+                                <h3 class="text-base font-display font-semibold text-foreground truncate" title={camera.name}>{camera.name}</h3>
+                                <p class="text-[10px] text-muted-foreground font-mono mt-0.5 truncate">{camera.id}</p>
                             </div>
-                            
-                            <div class="flex items-center gap-3">
-                                <label class="switch">
-                                    <input type="checkbox" bind:checked={camera.enabled} />
-                                    <span class="slider"></span>
+
+                            <div class="flex flex-col items-end gap-2 shrink-0">
+                                <!-- Toggle switch -->
+                                <label class="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" bind:checked={camera.enabled} class="sr-only peer" />
+                                    <div class="w-9 h-5 rounded-full bg-muted border border-border peer-checked:bg-jade peer-checked:border-jade transition-all relative
+                                        after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:w-3.5 after:h-3.5 after:rounded-full after:bg-foreground after:transition-transform peer-checked:after:translate-x-4
+                                        peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-background"></div>
                                 </label>
-                                
-                                <button onclick={() => removeCamera(camera.id)} class="btn-delete" title="Delete camera settings">
-                                    🗑️
+                                <button onclick={() => removeCamera(camera.id)} class="btn-icon !w-7 !h-7 hover:!text-crimson hover:!border-crimson/30" title="Delete">
+                                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1-1-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2M10 11v6M14 11v6"/>
+                                    </svg>
                                 </button>
                             </div>
                         </div>
 
-                        <!-- Card Body -->
-                        <div class="card-body">
-                            <!-- Visual Placeholder Feed thumbnail -->
-                            <div class="feed-thumbnail-placeholder">
-                                <div class="scanlines"></div>
-                                <div class="hud-center">
-                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity: 0.4;">
-                                        <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/>
+                        <!-- Mini feed preview -->
+                        <div class="relative w-full aspect-video bg-black rounded-lg overflow-hidden border border-border surface-grid flex items-center justify-center">
+                            <div class="absolute inset-0 flex flex-col items-center justify-center gap-1.5">
+                                <div class="w-10 h-10 rounded-lg bg-surface-2/80 border border-border flex items-center justify-center text-muted-foreground">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                                        <circle cx="12" cy="13" r="4"/>
                                     </svg>
-                                    <span class="lbl">{camera.enabled ? 'CHANNEL ONLINE' : 'STANDBY'}</span>
                                 </div>
+                                <span class="text-[9px] font-mono font-bold tracking-widest text-muted-foreground uppercase">{camera.enabled ? 'Channel Online' : 'Standby'}</span>
                             </div>
 
-                            <div class="simple-metadata">
-                                <div class="meta-row">
-                                    <span class="meta-lbl">Pipeline ID</span>
-                                    <span class="meta-val font-mono">{camera.id}</span>
-                                </div>
-                                <div class="meta-row">
-                                    <span class="meta-lbl">Stream Source</span>
-                                    <span class="meta-val uppercase">{camera.source}</span>
-                                </div>
-                            </div>
-
-                            <!-- Expandable advanced configuration triggers -->
-                            <button onclick={() => expandedCameraSettings[camera.id] = !expandedCameraSettings[camera.id]} class="glass-btn config-btn">
-                                ⚙️ {expandedCameraSettings[camera.id] ? 'Hide Configuration' : 'Configure Channel'}
-                            </button>
-
-                            <!-- Slider Accordion drawer -->
-                            {#if expandedCameraSettings[camera.id]}
-                                <div class="advanced-config-drawer" transition:slide>
-                                    <div class="inputs-grid">
-                                        <div class="form-group span-2">
-                                            <label>Friendly Name</label>
-                                            <input type="text" bind:value={camera.name} />
-                                        </div>
-
-                                        {#if camera.source === 'rtsp'}
-                                             <div class="form-group">
-                                                 <label>RTSP Stream (High-Res Record)</label>
-                                                 <input type="text" bind:value={camera.url} />
-                                             </div>
-                                             <div class="form-group">
-                                                 <label>RTSP Sub-Stream (Low-Res AI, Optional)</label>
-                                                 <input type="text" bind:value={camera.detect_url} placeholder="Sub-stream link (falls back to main stream)" />
-                                             </div>
-                                         {/if}
-
-                                        <div class="form-group">
-                                            <label class="slider-lbl">
-                                                <span>Processor FPS Target</span>
-                                                <span class="val-badge">{camera.fps} FPS</span>
-                                            </label>
-                                            <input type="range" min="1" max="30" bind:value={camera.fps} class="styled-range" />
-                                        </div>
-
-                                        <div class="form-group">
-                                            <label class="slider-lbl">
-                                                <span>YOLO Threshold</span>
-                                                <span class="val-badge">{Math.round(camera.confidence * 100)}%</span>
-                                            </label>
-                                            <input type="range" min="0.10" max="0.95" step="0.05" bind:value={camera.confidence} class="styled-range" />
-                                        </div>
-
-                                        <div class="form-group flex-row span-2">
-                                            <label class="checkbox-container">
-                                                <input type="checkbox" bind:checked={camera.enable_motion_gating} />
-                                                <span>Enable Motion Gating (Saves CPU)</span>
-                                            </label>
-                                        </div>
-
-                                         {#if camera.enable_motion_gating}
-                                             <div class="form-group span-2" style="margin-top: 0.5rem;">
-                                                 <button 
-                                                     type="button" 
-                                                     onclick={() => openMaskEditor(camera)}
-                                                     class="glass-btn mask-btn"
-                                                 >
-                                                     🎨 Draw Exclusion Masks & Alert Zones
-                                                 </button>
-                                             </div>
-                                         {/if}
-                                    </div>
+                            <!-- Mask count badge -->
+                            {#if (camera.motion_masks?.length || 0) + (camera.alert_zones?.length || 0) > 0}
+                                <div class="absolute bottom-2 left-2 flex items-center gap-1.5">
+                                    {#if (camera.motion_masks?.length || 0) > 0}
+                                        <span class="badge !h-5 !text-[9px] !bg-crimson/10 !text-crimson !border-crimson/30 backdrop-blur-sm">
+                                            <span class="w-1 h-1 rounded-full bg-crimson"></span>
+                                            {camera.motion_masks!.length} MASK
+                                        </span>
+                                    {/if}
+                                    {#if (camera.alert_zones?.length || 0) > 0}
+                                        <span class="badge !h-5 !text-[9px] !bg-jade/10 !text-jade !border-jade/30 backdrop-blur-sm">
+                                            <span class="w-1 h-1 rounded-full bg-jade"></span>
+                                            {camera.alert_zones!.length} ZONE
+                                        </span>
+                                    {/if}
                                 </div>
                             {/if}
+
+                            <!-- Quick metrics -->
+                            <div class="absolute top-2 right-2 flex items-center gap-1.5">
+                                <span class="badge !h-5 !text-[9px] !bg-black/60 !border-white/10 backdrop-blur-sm font-mono">{camera.fps}FPS</span>
+                            </div>
                         </div>
-                    </div>
-                {/each}
-            </div>
-        {/if}
-    </section>
 
-    <!-- Interactive polygon SVG canvas editor modal -->
-    {#if activeEditorCamera}
-        <div class="mask-modal-overlay">
-            <div class="mask-modal-content glass-panel">
-                <div class="modal-header">
-                    <div>
-                        <h2>Surveillance Regions Editor</h2>
-                        <div class="drawing-mode-selector flex gap-2 mt-2">
-                            <button 
-                                type="button" 
-                                onclick={() => { drawingMode = 'mask'; drawingPoints = []; }}
-                                class="mode-btn mode-mask" 
-                                class:active={drawingMode === 'mask'}
-                            >
-                                🔴 Exclusion Mask
-                            </button>
-                            <button 
-                                type="button" 
-                                onclick={() => { drawingMode = 'zone'; drawingPoints = []; }}
-                                class="mode-btn mode-zone" 
-                                class:active={drawingMode === 'zone'}
-                            >
-                                🟢 Alert Zone
-                            </button>
+                        <!-- Quick stats -->
+                        <div class="grid grid-cols-3 gap-2 text-[10px] font-mono">
+                            <div class="flex flex-col gap-0.5 px-2.5 py-1.5 rounded-md bg-surface-2/40 border border-border/50">
+                                <span class="text-muted-foreground uppercase tracking-wider">FPS</span>
+                                <span class="text-sm font-bold text-foreground tabular-nums">{camera.fps}</span>
+                            </div>
+                            <div class="flex flex-col gap-0.5 px-2.5 py-1.5 rounded-md bg-surface-2/40 border border-border/50">
+                                <span class="text-muted-foreground uppercase tracking-wider">YOLO</span>
+                                <span class="text-sm font-bold text-foreground tabular-nums">{Math.round(camera.confidence * 100)}%</span>
+                            </div>
+                            <div class="flex flex-col gap-0.5 px-2.5 py-1.5 rounded-md bg-surface-2/40 border border-border/50">
+                                <span class="text-muted-foreground uppercase tracking-wider">Gating</span>
+                                <span class="text-sm font-bold {camera.enable_motion_gating ? 'text-jade' : 'text-muted-foreground'}">{camera.enable_motion_gating ? 'ON' : 'OFF'}</span>
+                            </div>
                         </div>
-                    </div>
-                    <button onclick={closeMaskEditor} class="btn-close-modal" type="button" title="Close Editor">
-                        ×
-                    </button>
-                </div>
 
-                <div class="modal-body flex flex-col gap-4">
-                    <div class="mask-editor-canvas-container">
-                        {#if activeEditorCamera.source === 'webcam'}
-                            <!-- svelte-ignore a11y_media_has_caption -->
-                            <video
-                                use:bindStream={editorStream}
-                                autoplay
-                                playsinline
-                                muted
-                                class="editor-video-feed"
-                            ></video>
-                        {/if}
+                        <!-- Configure trigger -->
+                        <button
+                            onclick={() => expandedCameraSettings[camera.id] = !expandedCameraSettings[camera.id]}
+                            class="btn btn-ghost btn-sm w-full justify-between"
+                        >
+                            <span class="flex items-center gap-2">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <circle cx="12" cy="12" r="3"/>
+                                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                                </svg>
+                                {expandedCameraSettings[camera.id] ? 'Hide Configuration' : 'Configure Channel'}
+                            </span>
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"
+                                class="transition-transform {expandedCameraSettings[camera.id] ? 'rotate-180' : ''}">
+                                <polyline points="6 9 12 15 18 9"/>
+                            </svg>
+                        </button>
 
-                        {#if !editorStream}
-                            <div class="hud-grid"></div>
-                            <div class="hud-text text-center">
-                                <span class="hud-title uppercase">Live Viewport Placeholder</span>
-                                {#if drawingMode === 'mask'}
-                                    <span class="hud-desc">🔴 Exclusion Mask: Areas where motion is completely ignored.</span>
-                                {:else}
-                                    <span class="hud-desc">🟢 Alert Zone: Areas where detections scale alerts to full severity.</span>
+                        {#if expandedCameraSettings[camera.id]}
+                            <div class="flex flex-col gap-3 pt-3 border-t border-border" transition:slide={{ duration: 200 }}>
+                                <div class="flex flex-col gap-1.5">
+                                    <label for="edit-name-{camera.id}" class="section-eyebrow">Friendly Name</label>
+                                    <input id="edit-name-{camera.id}" type="text" bind:value={camera.name} class="input" />
+                                </div>
+
+                                {#if camera.source === 'rtsp'}
+                                    <div class="flex flex-col gap-1.5">
+                                        <label for="edit-url-{camera.id}" class="section-eyebrow">RTSP Stream (High-Res Record)</label>
+                                        <input id="edit-url-{camera.id}" type="text" bind:value={camera.url} class="input font-mono text-[11px]" />
+                                    </div>
+                                    <div class="flex flex-col gap-1.5">
+                                        <label for="edit-detect-url-{camera.id}" class="section-eyebrow">RTSP Sub-Stream (Low-Res AI, Optional)</label>
+                                        <input id="edit-detect-url-{camera.id}" type="text" bind:value={camera.detect_url} placeholder="Sub-stream link (falls back to main stream)" class="input font-mono text-[11px]" />
+                                    </div>
+                                {/if}
+
+                                <div class="flex flex-col gap-1.5">
+                                    <div class="flex justify-between items-center">
+                                        <label for="edit-fps-{camera.id}" class="section-eyebrow">Processor FPS Target</label>
+                                        <span class="text-[10px] font-mono font-bold text-cyan">{camera.fps} FPS</span>
+                                    </div>
+                                    <input id="edit-fps-{camera.id}" type="range" min="1" max="30" bind:value={camera.fps} class="range" />
+                                </div>
+
+                                <div class="flex flex-col gap-1.5">
+                                    <div class="flex justify-between items-center">
+                                        <label for="edit-confidence-{camera.id}" class="section-eyebrow">YOLO Confidence Threshold</label>
+                                        <span class="text-[10px] font-mono font-bold text-cyan">{Math.round(camera.confidence * 100)}%</span>
+                                    </div>
+                                    <input id="edit-confidence-{camera.id}" type="range" min="0.10" max="0.95" step="0.05" bind:value={camera.confidence} class="range" />
+                                </div>
+
+                                <label class="flex items-center gap-2.5 p-2.5 rounded-md border border-border bg-surface-2/40 cursor-pointer hover:bg-surface-2 transition-colors">
+                                    <input type="checkbox" bind:checked={camera.enable_motion_gating} class="checkbox" />
+                                    <span class="text-xs font-semibold text-foreground">Enable Motion Gating</span>
+                                    <span class="text-[10px] text-muted-foreground font-mono ml-auto">Saves CPU</span>
+                                </label>
+
+                                {#if camera.enable_motion_gating}
+                                    <button
+                                        type="button"
+                                        onclick={() => openMaskEditor(camera)}
+                                        class="btn btn-iris btn-sm w-full"
+                                    >
+                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                            <path d="M12 19l7-7 3 3-7 7-3-3z"/>
+                                            <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/>
+                                            <path d="M2 2l7.586 7.586"/>
+                                            <circle cx="11" cy="11" r="2"/>
+                                        </svg>
+                                        Draw Exclusion Masks &amp; Alert Zones
+                                    </button>
                                 {/if}
                             </div>
                         {/if}
-
-                        <svg
-                            bind:this={svgElement}
-                            onclick={handleSvgClick}
-                            onmousemove={handleSvgMouseMove}
-                            class="mask-svg-workspace"
-                            viewBox="0 0 1000 1000"
-                            preserveAspectRatio="none"
-                            role="button"
-                            tabindex="0"
-                            aria-label="Motion mask canvas editor"
-                            onkeydown={(e) => {
-                                if (e.key === 'Escape') cancelDrawing();
-                                if (e.key === 'Enter') closePolygon();
-                            }}
-                        >
-                            {#if activeEditorCamera.motion_masks}
-                                {#each activeEditorCamera.motion_masks as mask, idx}
-                                    <polygon
-                                        points={mask.map(pt => `${pt[0] * 1000},${pt[1] * 1000}`).join(' ')}
-                                        class="closed-mask-poly"
-                                    />
-                                {/each}
-                            {/if}
-
-                            {#if activeEditorCamera.alert_zones}
-                                {#each activeEditorCamera.alert_zones as zone, idx}
-                                    <polygon
-                                        points={zone.map(pt => `${pt[0] * 1000},${pt[1] * 1000}`).join(' ')}
-                                        class="closed-zone-poly"
-                                    />
-                                {/each}
-                            {/if}
-
-                            {#if drawingPoints.length > 0}
-                                <polyline
-                                    points={drawingPoints.map(pt => `${pt[0] * 1000},${pt[1] * 1000}`).join(' ')}
-                                    class="drawing-poly-line"
-                                    class:drawing-zone-line={drawingMode === 'zone'}
-                                />
-                                <line
-                                    x1={drawingPoints[drawingPoints.length - 1][0] * 1000}
-                                    y1={drawingPoints[drawingPoints.length - 1][1] * 1000}
-                                    x2={cursorX * 1000}
-                                    y2={cursorY * 1000}
-                                    class="rubberband-line"
-                                    class:rubberband-zone-line={drawingMode === 'zone'}
-                                />
-                            {/if}
-
-                            {#each drawingPoints as pt, idx}
-                                <circle
-                                    cx={pt[0] * 1000}
-                                    cy={pt[1] * 1000}
-                                    r={idx === 0 ? 12 : 8}
-                                    class="drawing-node"
-                                    class:drawing-zone-node={drawingMode === 'zone'}
-                                    class:first-node={idx === 0}
-                                />
-                            {/each}
-                        </svg>
-                    </div>
-
-                    <div class="mask-details-container flex flex-col gap-3">
-                        <div class="glass-panel p-3">
-                            <h4 class="section-title text-xs uppercase tracking-wider mb-2" style="color: var(--accent-rose);">🔴 Exclusion Masks ({activeEditorCamera.motion_masks?.length || 0})</h4>
-                            {#if !activeEditorCamera.motion_masks || activeEditorCamera.motion_masks.length === 0}
-                                <div class="empty-masks-state text-xs text-white/40 text-center py-2">
-                                    No active motion exclusion masks.
-                                </div>
-                            {:else}
-                                <div class="masks-chips flex flex-wrap gap-2">
-                                    {#each activeEditorCamera.motion_masks as mask, idx}
-                                        <div class="mask-chip flex items-center gap-2">
-                                            <span class="chip-color mask-color"></span>
-                                            <span class="chip-label text-xs">Mask #{idx + 1}</span>
-                                            <button onclick={() => removePolygon(idx, 'mask')} type="button" class="chip-delete">×</button>
-                                        </div>
-                                    {/each}
-                                </div>
-                            {/if}
-                        </div>
-
-                        <div class="glass-panel p-3">
-                            <h4 class="section-title text-xs uppercase tracking-wider mb-2" style="color: var(--accent-emerald);">🟢 Alert Zones ({activeEditorCamera.alert_zones?.length || 0})</h4>
-                            {#if !activeEditorCamera.alert_zones || activeEditorCamera.alert_zones.length === 0}
-                                <div class="empty-masks-state text-xs text-white/40 text-center py-2">
-                                    No active activity alert zones.
-                                </div>
-                            {:else}
-                                <div class="masks-chips flex flex-wrap gap-2">
-                                    {#each activeEditorCamera.alert_zones as zone, idx}
-                                        <div class="mask-chip flex items-center gap-2">
-                                            <span class="chip-color zone-color"></span>
-                                            <span class="chip-label text-xs">Zone #{idx + 1}</span>
-                                            <button onclick={() => removePolygon(idx, 'zone')} type="button" class="chip-delete">×</button>
-                                        </div>
-                                    {/each}
-                                </div>
-                            {/if}
-                        </div>
                     </div>
                 </div>
-
-                <div class="modal-footer">
-                    <div class="flex gap-2">
-                        {#if drawingPoints.length >= 3}
-                            <button onclick={closePolygon} type="button" class="glass-btn primary text-xs">
-                                Close Shape
-                            </button>
-                        {/if}
-                        {#if drawingPoints.length > 0}
-                            <button onclick={cancelDrawing} type="button" class="glass-btn text-xs">
-                                Cancel Draw
-                            </button>
-                        {/if}
-                    </div>
-
-                    <div class="flex gap-2">
-                        {#if (drawingMode === 'mask' && activeEditorCamera.motion_masks && activeEditorCamera.motion_masks.length > 0) || (drawingMode === 'zone' && activeEditorCamera.alert_zones && activeEditorCamera.alert_zones.length > 0)}
-                            <button onclick={clearAllPolygons} type="button" class="glass-btn text-xs text-red-400">
-                                Reset Shapes
-                            </button>
-                        {/if}
-                        <button onclick={closeMaskEditor} type="button" class="glass-btn primary text-xs">
-                            Done
-                        </button>
-                    </div>
-                </div>
-            </div>
+            {/each}
         </div>
     {/if}
 </div>
 
-<style>
-    .cameras-layout {
-        display: flex;
-        flex-direction: column;
-        gap: 1rem;
-        height: calc(100vh - 88px);
-        box-sizing: border-box;
-    }
-
-    .cameras-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 0.75rem 1.25rem;
-    }
-
-    .cameras-header h1 {
-        font-family: var(--font-display);
-        font-size: 1.2rem;
-        font-weight: 700;
-        margin: 0;
-    }
-
-    .subtitle {
-        color: var(--text-muted);
-        font-size: 0.75rem;
-        margin: 0.15rem 0 0 0;
-    }
-
-    .glass-panel {
-        background: var(--bg-panel);
-        border: 1px solid var(--border-glass);
-        border-radius: 12px;
-    }
-
-    .glass-btn.primary {
-        background: var(--accent-indigo);
-        border-color: var(--accent-indigo);
-        color: white;
-    }
-
-    .add-camera-panel {
-        padding: 1rem;
-        margin-bottom: 0.5rem;
-    }
-
-    .add-camera-panel h3 {
-        margin: 0 0 0.75rem 0;
-        font-size: 0.85rem;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        color: var(--text-secondary);
-    }
-
-    .grid-form {
-        display: grid;
-        grid-template-columns: repeat(2, 1fr);
-        gap: 1rem;
-    }
-
-    .form-group {
-        display: flex;
-        flex-direction: column;
-        gap: 0.25rem;
-    }
-
-    .form-group.span-2 {
-        grid-column: span 2;
-    }
-
-    .form-group.flex-row {
-        flex-direction: row;
-        align-items: center;
-    }
-
-    label {
-        font-size: 0.65rem;
-        font-weight: 600;
-        color: var(--text-muted);
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-    }
-
-    input[type="text"], select {
-        padding: 0.45rem 0.65rem;
-        background: var(--bg-control);
-        border: 1px solid var(--border-color);
-        border-radius: 6px;
-        color: var(--text-primary);
-        font-family: var(--font-sans);
-        font-size: 0.75rem;
-        outline: none;
-        transition: var(--transition-smooth);
-    }
-
-    input[type="text"]:focus, select:focus {
-        border-color: var(--border-color-hover);
-    }
-
-    /* Switch toggle styles */
-    .switch {
-        position: relative;
-        display: inline-block;
-        width: 32px;
-        height: 18px;
-    }
-
-    .switch input {
-        opacity: 0;
-        width: 0;
-        height: 0;
-    }
-
-    .slider {
-        position: absolute;
-        cursor: pointer;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background-color: rgba(255, 255, 255, 0.1);
-        transition: .2s;
-        border-radius: 9px;
-        border: 1px solid var(--border-glass);
-    }
-
-    .slider:before {
-        position: absolute;
-        content: "";
-        height: 12px;
-        width: 12px;
-        left: 2px;
-        bottom: 2px;
-        background-color: white;
-        transition: .2s;
-        border-radius: 50%;
-    }
-
-    input:checked + .slider {
-        background-color: var(--accent-indigo);
-    }
-
-    input:checked + .slider:before {
-        transform: translateX(14px);
-    }
-
-    /* Cameras stack */
-    .cameras-stack {
-        flex: 1;
-        overflow-y: auto;
-        padding-bottom: 1rem;
-    }
-
-    .cameras-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-        gap: 1.25rem;
-    }
-
-    .camera-card {
-        background: var(--bg-panel);
-        border: 1px solid var(--border-glass);
-        border-radius: 12px;
-        display: flex;
-        flex-direction: column;
-        transition: var(--transition-smooth);
-    }
-
-    .camera-card.disabled {
-        opacity: 0.65;
-    }
-
-    .card-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 0.75rem 1rem;
-        border-bottom: 1px solid var(--border-glass);
-    }
-
-    .status-dot {
-        width: 6px;
-        height: 6px;
-        border-radius: 50%;
-        background-color: var(--text-muted);
-    }
-
-    .status-dot.enabled {
-        background-color: var(--accent-emerald);
-        box-shadow: 0 0 6px var(--accent-emerald);
-    }
-
-    .camera-name {
-        margin: 0;
-        font-family: var(--font-display);
-        font-size: 0.85rem;
-        font-weight: 600;
-        color: var(--text-primary);
-    }
-
-    .btn-delete {
-        background: none;
-        border: none;
-        cursor: pointer;
-        padding: 0.15rem;
-        font-size: 0.85rem;
-        opacity: 0.4;
-        transition: opacity var(--transition-smooth);
-    }
-
-    .btn-delete:hover {
-        opacity: 1;
-    }
-
-    .card-body {
-        padding: 1rem;
-        display: flex;
-        flex-direction: column;
-        gap: 0.75rem;
-    }
-
-    /* Thumbnail placeholder */
-    .feed-thumbnail-placeholder {
-        background: #020306;
-        border: 1px solid var(--border-glass);
-        border-radius: 8px;
-        height: 120px;
-        position: relative;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        overflow: hidden;
-    }
-
-    .scanlines {
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
-        background-size: 100% 4px, 6px 100%;
-        pointer-events: none;
-    }
-
-    .hud-center {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 0.35rem;
-        color: var(--text-muted);
-    }
-
-    .hud-center .lbl {
-        font-size: 0.6rem;
-        font-weight: 700;
-        letter-spacing: 0.05em;
-    }
-
-    .simple-metadata {
-        display: flex;
-        flex-direction: column;
-        gap: 0.35rem;
-        border-bottom: 1px solid var(--border-glass);
-        padding-bottom: 0.75rem;
-    }
-
-    .meta-row {
-        display: flex;
-        justify-content: space-between;
-        font-size: 0.7rem;
-    }
-
-    .meta-lbl {
-        color: var(--text-muted);
-    }
-
-    .meta-val {
-        color: var(--text-secondary);
-        font-weight: 600;
-    }
-
-    .config-btn {
-        width: 100%;
-        padding: 0.45rem;
-        font-size: 0.75rem;
-        justify-content: center;
-    }
-
-    /* Advanced Config drawer */
-    .advanced-config-drawer {
-        background: rgba(0, 0, 0, 0.15);
-        border: 1px solid var(--border-glass);
-        border-radius: 8px;
-        padding: 0.75rem;
-        margin-top: 0.25rem;
-    }
-
-    .advanced-config-drawer .inputs-grid {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 0.75rem;
-    }
-
-    .slider-lbl {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-    }
-
-    .val-badge {
-        font-size: 0.6rem;
-        font-family: var(--font-mono);
-        color: var(--accent-indigo);
-        background: rgba(99, 102, 241, 0.08);
-        padding: 0.05rem 0.35rem;
-        border-radius: 4px;
-    }
-
-    .styled-range {
-        width: 100%;
-        accent-color: var(--accent-indigo);
-        cursor: pointer;
-    }
-
-    .checkbox-container {
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-        cursor: pointer;
-        font-size: 0.7rem;
-        color: var(--text-secondary);
-        font-weight: 500;
-    }
-
-    .mask-btn {
-        width: 100%;
-        justify-content: center;
-        padding: 0.4rem;
-        font-size: 0.7rem;
-        border-color: rgba(99, 102, 241, 0.2);
-        color: #a5b4fc;
-    }
-
-    .mask-btn:hover {
-        background: rgba(99, 102, 241, 0.05);
-    }
-
-    /* Mask drawer modal */
-    .mask-modal-overlay {
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background: rgba(3, 5, 10, 0.85);
-        backdrop-filter: blur(10px);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 500;
-    }
-
-    .mask-modal-content {
-        width: 90%;
-        max-width: 600px;
-        padding: 1.25rem;
-        border-radius: 16px;
-        box-shadow: 0 24px 48px rgba(0,0,0,0.6);
-        border: 1px solid var(--border-glass-hover);
-    }
-
-    .modal-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: flex-start;
-        border-bottom: 1px solid var(--border-glass);
-        padding-bottom: 0.5rem;
-    }
-
-    .modal-header h2 {
-        font-family: var(--font-display);
-        font-size: 1rem;
-        font-weight: 600;
-        margin: 0;
-    }
-
-    .btn-close-modal {
-        background: none;
-        border: none;
-        color: var(--text-muted);
-        font-size: 1.5rem;
-        cursor: pointer;
-        line-height: 1;
-    }
-
-    .drawing-mode-selector {
-        display: flex;
-        gap: 0.5rem;
-    }
-
-    .mode-btn {
-        background: transparent;
-        border: 1px solid var(--border-glass);
-        color: var(--text-secondary);
-        padding: 0.2rem 0.5rem;
-        border-radius: 4px;
-        font-size: 0.65rem;
-        font-weight: 600;
-        cursor: pointer;
-    }
-
-    .mode-btn.active {
-        color: white;
-        background: rgba(255,255,255,0.06);
-    }
-
-    .mode-btn.mode-mask.active {
-        border-color: var(--accent-rose);
-        background: rgba(244, 63, 94, 0.05);
-    }
-
-    .mode-btn.mode-zone.active {
-        border-color: var(--accent-emerald);
-        background: rgba(16, 185, 129, 0.05);
-    }
-
-    .modal-body {
-        padding: 1rem 0;
-        display: flex;
-        flex-direction: column;
-        gap: 1rem;
-    }
-
-    .mask-editor-canvas-container {
-        position: relative;
-        background: #020306;
-        border-radius: 8px;
-        border: 1px solid var(--border-glass);
-        width: 100%;
-        aspect-ratio: 16 / 9;
-        overflow: hidden;
-    }
-
-    .editor-video-feed {
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
-    }
-
-    .hud-grid {
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background-size: 20px 20px;
-        background-image: linear-gradient(to right, rgba(255, 255, 255, 0.02) 1px, transparent 1px), linear-gradient(to bottom, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
-    }
-
-    .hud-text {
-        position: absolute;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        color: var(--text-muted);
-        display: flex;
-        flex-direction: column;
-        gap: 0.25rem;
-    }
-
-    .hud-title {
-        font-family: var(--font-display);
-        font-size: 0.75rem;
-        font-weight: 700;
-        letter-spacing: 0.05em;
-    }
-
-    .hud-desc {
-        font-size: 0.65rem;
-        max-width: 280px;
-        line-height: 1.3;
-    }
-
-    .mask-svg-workspace {
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        cursor: crosshair;
-    }
-
-    .closed-mask-poly {
-        fill: rgba(244, 63, 94, 0.2);
-        stroke: var(--accent-rose);
-        stroke-width: 3;
-    }
-
-    .closed-zone-poly {
-        fill: rgba(16, 185, 129, 0.15);
-        stroke: var(--accent-emerald);
-        stroke-width: 3;
-    }
-
-    .drawing-poly-line {
-        fill: none;
-        stroke: var(--accent-rose);
-        stroke-width: 3;
-        stroke-dasharray: 6 4;
-    }
-
-    .drawing-poly-line.drawing-zone-line {
-        stroke: var(--accent-emerald);
-    }
-
-    .rubberband-line {
-        stroke: var(--accent-rose);
-        stroke-width: 2;
-        stroke-dasharray: 4 4;
-    }
-
-    .rubberband-line.rubberband-zone-line {
-        stroke: var(--accent-emerald);
-    }
-
-    .drawing-node {
-        fill: white;
-        stroke: var(--accent-rose);
-        stroke-width: 3;
-    }
-
-    .drawing-node.drawing-zone-node {
-        stroke: var(--accent-emerald);
-    }
-
-    .drawing-node.first-node {
-        fill: var(--accent-rose);
-        animation: pulse-node 1.5s infinite;
-    }
-
-    .drawing-node.drawing-zone-node.first-node {
-        fill: var(--accent-emerald);
-    }
-
-    @keyframes pulse-node {
-        0% { r: 10px; }
-        50% { r: 13px; }
-        100% { r: 10px; }
-    }
-
-    .mask-chip {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.35rem;
-        background: rgba(255,255,255,0.02);
-        border: 1px solid var(--border-glass);
-        padding: 0.15rem 0.5rem;
-        border-radius: 4px;
-    }
-
-    .chip-color {
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-    }
-
-    .chip-color.mask-color { background-color: var(--accent-rose); }
-    .chip-color.zone-color { background-color: var(--accent-emerald); }
-
-    .chip-delete {
-        background: none;
-        border: none;
-        cursor: pointer;
-        color: var(--text-muted);
-        font-size: 0.85rem;
-        line-height: 1;
-        padding: 0;
-    }
-
-    .chip-delete:hover {
-        color: white;
-    }
-
-    .modal-footer {
-        display: flex;
-        justify-content: space-between;
-        border-top: 1px solid var(--border-glass);
-        padding-top: 0.75rem;
-        margin-top: 0.5rem;
-    }
-
-    .empty-masks-state {
-        color: var(--text-muted);
-    }
-
-    .empty-state {
-        border: 1px dashed var(--border-glass);
-        border-radius: 12px;
-        padding: 4rem 2rem;
-    }
-
-    .empty-state h3 {
-        font-family: var(--font-display);
-        font-size: 1rem;
-        margin: 0.5rem 0 0.25rem;
-    }
-
-    .empty-state p {
-        font-size: 0.75rem;
-        color: var(--text-muted);
-        margin: 0;
-    }
-</style>
+<!-- Polygon editor modal -->
+{#if activeEditorCamera}
+    <div class="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+        transition:fade={{ duration: 150 }}>
+        <div class="panel w-full max-w-4xl max-h-[90vh] flex flex-col"
+            transition:fly={{ y: 20, duration: 200 }}>
+
+            <div class="panel-header">
+                <div class="flex flex-col gap-2">
+                    <div>
+                        <h2 class="text-base font-display font-semibold text-foreground">Surveillance Regions Editor</h2>
+                        <p class="text-[10px] text-muted-foreground font-mono">{activeEditorCamera.name} · click to add points, click first point to close</p>
+                    </div>
+                    <!-- Mode switcher -->
+                    <div class="flex items-center bg-surface-2 border border-border rounded-lg p-0.5 h-8 self-start">
+                        <button
+                            type="button"
+                            onclick={() => { drawingMode = 'mask'; drawingPoints = []; }}
+                            class="h-6 px-3 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all flex items-center gap-1.5"
+                            class:bg-crimson={drawingMode === 'mask'}
+                            class:text-crimson-foreground={drawingMode === 'mask'}
+                            class:text-muted-foreground={drawingMode !== 'mask'}
+                        >
+                            <span class="w-1.5 h-1.5 rounded-full"
+                                class:bg-crimson-foreground={drawingMode === 'mask'}
+                                class:bg-crimson={drawingMode !== 'mask'}></span>
+                            Exclusion Mask
+                        </button>
+                        <button
+                            type="button"
+                            onclick={() => { drawingMode = 'zone'; drawingPoints = []; }}
+                            class="h-6 px-3 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all flex items-center gap-1.5"
+                            class:bg-jade={drawingMode === 'zone'}
+                            class:text-jade-foreground={drawingMode === 'zone'}
+                            class:text-muted-foreground={drawingMode !== 'zone'}
+                        >
+                            <span class="w-1.5 h-1.5 rounded-full"
+                                class:bg-jade-foreground={drawingMode === 'zone'}
+                                class:bg-jade={drawingMode !== 'zone'}></span>
+                            Alert Zone
+                        </button>
+                    </div>
+                </div>
+                <button type="button" onclick={closeMaskEditor} class="btn-icon !w-9 !h-9" aria-label="Close regions editor">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                </button>
+            </div>
+
+            <div class="flex-1 overflow-auto p-5">
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                    <!-- Canvas -->
+                    <div class="lg:col-span-2">
+                        <div class="relative w-full aspect-video bg-black rounded-xl border border-border overflow-hidden surface-grid">
+                            {#if activeEditorCamera.source === 'webcam'}
+                                <!-- svelte-ignore a11y_media_has_caption -->
+                                <video
+                                    use:bindStream={editorStream}
+                                    autoplay
+                                    playsinline
+                                    muted
+                                    class="absolute inset-0 w-full h-full object-cover"
+                                ></video>
+                            {/if}
+
+                            <svg
+                                bind:this={svgElement}
+                                onclick={handleSvgClick}
+                                onmousemove={handleSvgMouseMove}
+                                class="absolute inset-0 w-full h-full cursor-crosshair"
+                                viewBox="0 0 1000 1000"
+                                preserveAspectRatio="none"
+                                role="button"
+                                tabindex="0"
+                                aria-label="Polygon editor"
+                                onkeydown={(e) => {
+                                    if (e.key === 'Escape') cancelDrawing();
+                                    if (e.key === 'Enter') closePolygon();
+                                }}
+                            >
+                                {#if activeEditorCamera.motion_masks}
+                                    {#each activeEditorCamera.motion_masks as mask, idx}
+                                        <polygon
+                                            points={mask.map(pt => `${pt[0] * 1000},${pt[1] * 1000}`).join(' ')}
+                                            fill="hsl(0 78% 64% / 0.15)"
+                                            stroke="hsl(0 78% 64%)"
+                                            stroke-width="3"
+                                        />
+                                    {/each}
+                                {/if}
+
+                                {#if activeEditorCamera.alert_zones}
+                                    {#each activeEditorCamera.alert_zones as zone, idx}
+                                        <polygon
+                                            points={zone.map(pt => `${pt[0] * 1000},${pt[1] * 1000}`).join(' ')}
+                                            fill="hsl(152 68% 52% / 0.12)"
+                                            stroke="hsl(152 68% 52%)"
+                                            stroke-width="3"
+                                        />
+                                    {/each}
+                                {/if}
+
+                                {#if drawingPoints.length > 0}
+                                    <polyline
+                                        points={drawingPoints.map(pt => `${pt[0] * 1000},${pt[1] * 1000}`).join(' ')}
+                                        fill="none"
+                                        stroke={drawingMode === 'zone' ? 'hsl(152 68% 52%)' : 'hsl(0 78% 64%)'}
+                                        stroke-width="3"
+                                        stroke-dasharray="6 4"
+                                    />
+                                    <line
+                                        x1={drawingPoints[drawingPoints.length - 1][0] * 1000}
+                                        y1={drawingPoints[drawingPoints.length - 1][1] * 1000}
+                                        x2={cursorX * 1000}
+                                        y2={cursorY * 1000}
+                                        stroke={drawingMode === 'zone' ? 'hsl(152 68% 52%)' : 'hsl(0 78% 64%)'}
+                                        stroke-width="2"
+                                        stroke-dasharray="4 4"
+                                    />
+                                {/if}
+
+                                {#each drawingPoints as pt, idx}
+                                    <circle
+                                        cx={pt[0] * 1000}
+                                        cy={pt[1] * 1000}
+                                        r={idx === 0 ? 14 : 9}
+                                        fill={idx === 0 ? (drawingMode === 'zone' ? 'hsl(152 68% 52%)' : 'hsl(0 78% 64%)') : '#fff'}
+                                        stroke={drawingMode === 'zone' ? 'hsl(152 68% 52%)' : 'hsl(0 78% 64%)'}
+                                        stroke-width="3"
+                                    />
+                                {/each}
+                            </svg>
+
+                            <!-- Mode hint overlay -->
+                            <div class="absolute top-3 left-3 right-3 flex items-center pointer-events-none">
+                                <div class="px-2.5 h-7 rounded-md border backdrop-blur-sm flex items-center text-[10px] font-mono font-bold uppercase tracking-wider
+                                    {drawingMode === 'mask' ? 'bg-crimson/20 border-crimson/40 text-crimson' : ''}
+                                    {drawingMode === 'zone' ? 'bg-jade/20 border-jade/40 text-jade' : ''}">
+                                    {drawingMode === 'mask' ? 'Drawing Exclusion Mask' : 'Drawing Alert Zone'}
+                                </div>
+                            </div>
+
+                            {#if drawingPoints.length < 3}
+                                <div class="absolute bottom-3 left-3 px-2.5 h-7 rounded-md border border-border bg-black/70 backdrop-blur-sm flex items-center text-[10px] font-mono text-foreground">
+                                    {drawingPoints.length === 0 ? 'Click to place first point' : `${drawingPoints.length} points · ${3 - drawingPoints.length} more to close`}
+                                </div>
+                            {:else}
+                                <div class="absolute bottom-3 left-3 px-2.5 h-7 rounded-md border border-jade/40 bg-jade/20 backdrop-blur-sm flex items-center text-[10px] font-mono text-jade font-bold">
+                                    Click first point or "Close Shape" to finish
+                                </div>
+                            {/if}
+                        </div>
+                    </div>
+
+                    <!-- Region registry -->
+                    <div class="flex flex-col gap-3">
+                        <div class="panel !p-0 overflow-hidden">
+                            <div class="px-3 py-2.5 border-b border-border flex items-center justify-between">
+                                <div class="flex items-center gap-2">
+                                    <span class="w-1.5 h-1.5 rounded-full bg-crimson"></span>
+                                    <span class="text-[10px] font-mono font-bold text-foreground uppercase tracking-wider">Exclusion Masks</span>
+                                </div>
+                                <span class="badge !h-5 !text-[9px] !bg-crimson/10 !text-crimson !border-crimson/20 font-mono">{activeEditorCamera.motion_masks?.length || 0}</span>
+                            </div>
+                            <div class="p-3 max-h-32 overflow-y-auto no-scrollbar">
+                                {#if !activeEditorCamera.motion_masks || activeEditorCamera.motion_masks.length === 0}
+                                    <span class="text-[11px] text-muted-foreground italic">No active masks</span>
+                                {:else}
+                                    <div class="flex flex-col gap-1.5">
+                                        {#each activeEditorCamera.motion_masks as mask, idx}
+                                            <div class="flex items-center justify-between gap-2 px-2 py-1.5 rounded-md border border-crimson/20 bg-crimson/5">
+                                                <div class="flex items-center gap-2 min-w-0">
+                                                    <span class="w-1.5 h-1.5 rounded-full bg-crimson"></span>
+                                                    <span class="text-[10px] font-mono font-bold text-foreground">Mask #{idx + 1}</span>
+                                                </div>
+                                                <button onclick={() => removePolygon(idx, 'mask')} type="button" class="btn-icon !w-5 !h-5 hover:!text-crimson" title="Remove">
+                                                    <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                                                </button>
+                                            </div>
+                                        {/each}
+                                    </div>
+                                {/if}
+                            </div>
+                        </div>
+
+                        <div class="panel !p-0 overflow-hidden">
+                            <div class="px-3 py-2.5 border-b border-border flex items-center justify-between">
+                                <div class="flex items-center gap-2">
+                                    <span class="w-1.5 h-1.5 rounded-full bg-jade"></span>
+                                    <span class="text-[10px] font-mono font-bold text-foreground uppercase tracking-wider">Alert Zones</span>
+                                </div>
+                                <span class="badge !h-5 !text-[9px] !bg-jade/10 !text-jade !border-jade/20 font-mono">{activeEditorCamera.alert_zones?.length || 0}</span>
+                            </div>
+                            <div class="p-3 max-h-32 overflow-y-auto no-scrollbar">
+                                {#if !activeEditorCamera.alert_zones || activeEditorCamera.alert_zones.length === 0}
+                                    <span class="text-[11px] text-muted-foreground italic">No active zones</span>
+                                {:else}
+                                    <div class="flex flex-col gap-1.5">
+                                        {#each activeEditorCamera.alert_zones as zone, idx}
+                                            <div class="flex items-center justify-between gap-2 px-2 py-1.5 rounded-md border border-jade/20 bg-jade/5">
+                                                <div class="flex items-center gap-2 min-w-0">
+                                                    <span class="w-1.5 h-1.5 rounded-full bg-jade"></span>
+                                                    <span class="text-[10px] font-mono font-bold text-foreground">Zone #{idx + 1}</span>
+                                                </div>
+                                                <button onclick={() => removePolygon(idx, 'zone')} type="button" class="btn-icon !w-5 !h-5 hover:!text-crimson" title="Remove">
+                                                    <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                                                </button>
+                                            </div>
+                                        {/each}
+                                    </div>
+                                {/if}
+                            </div>
+                        </div>
+
+                        <div class="panel-inset p-3">
+                            <span class="section-eyebrow block mb-2">Legend</span>
+                            <div class="flex flex-col gap-1.5 text-[10px] font-mono">
+                                <div class="flex items-center gap-2">
+                                    <span class="w-2 h-2 rounded-full bg-crimson"></span>
+                                    <span class="text-foreground">Motion gating exclusion</span>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <span class="w-2 h-2 rounded-full bg-jade"></span>
+                                    <span class="text-foreground">Activity alert zone</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex justify-between items-center px-5 py-4 border-t border-border">
+                <div class="flex gap-2">
+                    {#if drawingPoints.length >= 3}
+                        <button onclick={closePolygon} type="button" class="btn btn-primary btn-sm">
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M20 6 9 17l-5-5"/>
+                            </svg>
+                            Close Shape
+                        </button>
+                    {/if}
+                    {#if drawingPoints.length > 0}
+                        <button onclick={cancelDrawing} type="button" class="btn btn-ghost btn-sm">Cancel Draw</button>
+                    {/if}
+                </div>
+
+                <div class="flex gap-2">
+                    {#if (drawingMode === 'mask' && activeEditorCamera.motion_masks && activeEditorCamera.motion_masks.length > 0) || (drawingMode === 'zone' && activeEditorCamera.alert_zones && activeEditorCamera.alert_zones.length > 0)}
+                        <button onclick={clearAllPolygons} type="button" class="btn btn-sm hover:!text-crimson hover:!border-crimson/30">
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1-1-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2M10 11v6M14 11v6"/>
+                            </svg>
+                            Reset Shapes
+                        </button>
+                    {/if}
+                    <button onclick={closeMaskEditor} type="button" class="btn btn-primary btn-sm">Done</button>
+                </div>
+            </div>
+        </div>
+    </div>
+{/if}

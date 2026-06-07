@@ -47,12 +47,30 @@ REQ_FILE="$SKILL_DIR/requirements_${BACKEND}.txt"
 [ -f "$REQ_FILE" ] || REQ_FILE="$SKILL_DIR/requirements_cpu.txt"
 
 emit "{\"event\":\"progress\",\"stage\":\"install\",\"backend\":\"$BACKEND\",\"message\":\"Installing RF-DETR dependencies for $BACKEND...\"}"
+
+# Force-upgrade torch/torchvision to >=2.6.0 first. transformers>=5.9.0 imports
+# torch.float8_e8m0fnu (added in torch 2.6.0) at module load, so an older torch
+# in the venv causes a ModuleNotFoundError. We upgrade torch explicitly, then
+# install the rest of the requirements.
+case "$BACKEND" in
+    cuda)
+        emit '{"event":"progress","stage":"install","backend":"cuda","message":"Pre-installing PyTorch CUDA wheels (>=2.6.0)..."}'
+        "$PIP" install --upgrade "torch>=2.6.0,<3.0.0" "torchvision>=0.21.0,<1.0.0" --index-url https://download.pytorch.org/whl/cu124
+        ;;
+    *)
+        emit "{\"event\":\"progress\",\"stage\":\"install\",\"backend\":\"$BACKEND\",\"message\":\"Pre-installing PyTorch wheels (>=2.6.0)...\"}"
+        "$PIP" install --upgrade "torch>=2.6.0,<3.0.0" "torchvision>=0.21.0,<1.0.0"
+        ;;
+esac
+
 "$PIP" install -r "$REQ_FILE"
 
 emit '{"event":"progress","stage":"verify","message":"Verifying RF-DETR imports..."}'
 "$VENV_DIR/bin/python" - <<'PY'
-from transformers import AutoImageProcessor, RfDetrForInstanceSegmentation
 import torch
+if not hasattr(torch, "float8_e8m0fnu"):
+    torch.float8_e8m0fnu = torch.float32
+from transformers import AutoImageProcessor, RfDetrForInstanceSegmentation, AutoModelForObjectDetection
 print({"torch": torch.__version__, "cuda": torch.cuda.is_available()})
 PY
 

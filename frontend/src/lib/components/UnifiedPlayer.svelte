@@ -382,9 +382,12 @@
         {/if}
 
         <!-- SVG overlay for drawing and display polygons (zones/masks) -->
-        <!-- svelte-ignore a11y_no_static_element_interactions -->
-        <svg 
+        <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+        <svg
             class="absolute inset-0 w-full h-full {drawingMode !== 'none' ? 'cursor-crosshair bg-black/35' : 'pointer-events-none'}"
+            role="application"
+            aria-label="Drawing canvas for surveillance zones and masks"
+            tabindex="-1"
             onclick={handleOverlayClick}
         >
             <!-- Display Saved Masks -->
@@ -514,10 +517,16 @@
         </div>
 
         <!-- Timeline track container -->
-        <!-- svelte-ignore a11y_no_static_element_interactions -->
-        <div 
+        <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+        <div
             bind:this={timelineRef}
             class="relative w-full h-8 bg-zinc-900 border border-zinc-800 rounded-xl cursor-pointer overflow-hidden shadow-inner group-timeline"
+            role="slider"
+            aria-label="Recording timeline scrubber"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuenow={scrubberPosition}
+            tabindex="0"
             onclick={handleTimelineClick}
             onmousemove={handleTimelineMouseMove}
             onmouseleave={handleTimelineMouseLeave}

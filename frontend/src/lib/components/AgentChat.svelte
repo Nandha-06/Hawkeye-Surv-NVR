@@ -1,5 +1,5 @@
 <script lang="ts">
-    let { 
+    let {
         chatId = '',
         chatMessages = $bindable([]),
         isGeneratingResponse = $bindable(false),
@@ -12,6 +12,23 @@
     }>();
 
     let userInput = $state('');
+    let scrollContainer = $state<HTMLDivElement | null>(null);
+
+    const ALLOWED_IMG_HOSTS = new Set<string>(['localhost', '127.0.0.1']);
+
+    function isSafeImageSrc(src: string): boolean {
+        if (!src) return false;
+        if (src.startsWith('/api/')) return true;
+        if (src.startsWith('data:image/')) return true;
+        if (src.startsWith('blob:')) return true;
+        try {
+            const u = new URL(src);
+            if (u.protocol !== 'https:' && u.protocol !== 'http:') return false;
+            return ALLOWED_IMG_HOSTS.has(u.hostname);
+        } catch {
+            return false;
+        }
+    }
 
     function sendChatMessage() {
         if (!userInput.trim() || !ws || ws.readyState !== WebSocket.OPEN) return;
@@ -20,6 +37,7 @@
         chatMessages = [...chatMessages, { role: 'user', text: messageText }];
         userInput = '';
         isGeneratingResponse = true;
+        autoScroll();
 
         ws.send(JSON.stringify({
             action: 'agent_chat',
@@ -29,7 +47,21 @@
         }));
     }
 
-    // Helper to parse markdown-like image syntax: ![alt](url)
+    async function autoScroll() {
+        await new Promise(r => setTimeout(r, 50));
+        if (scrollContainer) {
+            scrollContainer.scrollTo({
+                top: scrollContainer.scrollHeight,
+                behavior: 'smooth'
+            });
+        }
+    }
+
+    $effect(() => {
+        chatMessages.length;
+        autoScroll();
+    });
+
     function parseMessage(text: string) {
         const imgRegex = /!\[(.*?)\]\((.*?)\)/g;
         const parts = [];
@@ -57,20 +89,40 @@
     }
 </script>
 
-<div class="chat-viewport-box">
-    <div class="chat-messages-container">
+<div class="flex flex-col h-full bg-surface-2/30">
+    <div bind:this={scrollContainer} class="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
         {#each chatMessages as msg}
-            <div class="chat-message-bubble {msg.role}">
-                <div class="avatar">{msg.role === 'agent' ? '🤖' : '👤'}</div>
-                <div class="message-content-wrapper">
-                    <span class="sender-label">{msg.role === 'agent' ? 'Hawkeye Security' : 'You'}</span>
-                    <div class="message-text">
+            <div class="flex gap-2.5 items-start {msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}">
+                <div class="w-7 h-7 rounded-lg border flex items-center justify-center text-[10px] font-display font-bold shrink-0
+                    {msg.role === 'agent'
+                        ? 'bg-iris/10 border-iris/20 text-iris'
+                        : 'bg-cyan/10 border-cyan/20 text-cyan'}"
+                >
+                    {#if msg.role === 'agent'}
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M12 8V4H8"/>
+                            <rect width="16" height="12" x="4" y="8" rx="2"/>
+                            <path d="M2 14h2M20 14h2M15 13v2M9 13v2"/>
+                        </svg>
+                    {:else}
+                        A
+                    {/if}
+                </div>
+                <div class="flex flex-col gap-1 min-w-0 max-w-[85%] {msg.role === 'user' ? 'items-end' : 'items-start'}">
+                    <div class="text-[9px] font-mono font-bold text-muted-foreground uppercase tracking-wider">
+                        {msg.role === 'agent' ? 'Hawkeye' : 'You'}
+                    </div>
+                    <div class="rounded-xl px-3 py-2 border text-xs leading-relaxed
+                        {msg.role === 'user'
+                            ? 'bg-cyan/10 border-cyan/30 text-foreground rounded-tr-sm'
+                            : 'bg-card border-border text-foreground rounded-tl-sm'}"
+                    >
                         {#each parseMessage(msg.text) as part}
                             {#if part.type === 'text'}
-                                <p style="white-space: pre-wrap; margin: 0;">{part.content}</p>
-                            {:else if part.type === 'image'}
-                                <div class="chat-image-wrapper">
-                                    <img src={part.src} alt={part.alt} class="chat-embedded-img" />
+                                <p class="whitespace-pre-wrap m-0">{part.content}</p>
+                            {:else if part.type === 'image' && part.src && isSafeImageSrc(part.src)}
+                                <div class="mt-2 overflow-hidden rounded-md border border-border bg-black">
+                                    <img src={part.src} alt={part.alt} referrerpolicy="no-referrer" class="max-h-44 object-contain w-full" />
                                 </div>
                             {/if}
                         {/each}
@@ -78,206 +130,58 @@
                 </div>
             </div>
         {/each}
+
         {#if isGeneratingResponse}
-            <div class="chat-message-bubble agent">
-                <div class="avatar">🤖</div>
-                <div class="message-content-wrapper">
-                    <span class="sender-label">Hawkeye Security</span>
-                    <div class="message-text">
-                        <div class="typing-indicator">
-                            <span></span><span></span><span></span>
-                        </div>
+            <div class="flex gap-2.5 items-start">
+                <div class="w-7 h-7 rounded-lg border bg-iris/10 border-iris/20 text-iris flex items-center justify-center shrink-0">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 8V4H8"/>
+                        <rect width="16" height="12" x="4" y="8" rx="2"/>
+                        <path d="M2 14h2M20 14h2M15 13v2M9 13v2"/>
+                    </svg>
+                </div>
+                <div class="flex flex-col gap-1">
+                    <div class="text-[9px] font-mono font-bold text-muted-foreground uppercase tracking-wider">Hawkeye</div>
+                    <div class="bg-card border border-border rounded-xl rounded-tl-sm px-3 py-2.5 flex items-center gap-1.5">
+                        <span class="w-1 h-1 rounded-full bg-iris dot-float"></span>
+                        <span class="w-1 h-1 rounded-full bg-iris dot-float dot-delay-1"></span>
+                        <span class="w-1 h-1 rounded-full bg-iris dot-float dot-delay-2"></span>
                     </div>
                 </div>
             </div>
         {/if}
     </div>
-    <form class="chat-input-bar" onsubmit={(e) => { e.preventDefault(); sendChatMessage(); }}>
-        <input 
-            type="text" 
-            bind:value={userInput} 
-            placeholder="Ask Hawkeye about camera events..." 
-            disabled={isGeneratingResponse}
-            class="chat-input"
-        />
-        <button type="submit" class="btn btn-accent btn-send" disabled={isGeneratingResponse || !userInput.trim()}>
-            Send
-        </button>
+
+    <form class="p-3 border-t border-border bg-card/40" onsubmit={(e) => { e.preventDefault(); sendChatMessage(); }}>
+        <div class="flex gap-2">
+            <input
+                type="text"
+                bind:value={userInput}
+                placeholder="Ask about events…"
+                disabled={isGeneratingResponse}
+                class="input flex-1 !h-9 !text-xs"
+            />
+            <button
+                type="submit"
+                disabled={isGeneratingResponse || !userInput.trim()}
+                class="btn btn-primary btn-sm !px-3"
+                title="Send"
+            >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="22" y1="2" x2="11" y2="13"/>
+                    <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+                </svg>
+            </button>
+        </div>
     </form>
 </div>
 
 <style>
-    .chat-viewport-box {
-        display: flex;
-        flex-direction: column;
-        height: 100%;
-        background: var(--bg-control);
-        border-radius: 8px;
-        border: 1px solid var(--border-color);
-        overflow: hidden;
-    }
-    .chat-messages-container {
-        flex: 1;
-        overflow-y: auto;
-        padding: 1rem;
-        display: flex;
-        flex-direction: column;
-        gap: 0.75rem;
-    }
-    .chat-message-bubble {
-        display: flex;
-        gap: 0.5rem;
-        max-width: 90%;
-        align-items: flex-start;
-    }
-    .chat-message-bubble.user {
-        align-self: flex-end;
-        flex-direction: row-reverse;
-    }
-    .chat-message-bubble.agent {
-        align-self: flex-start;
-    }
-    .chat-message-bubble .avatar {
-        width: 28px;
-        height: 28px;
-        border-radius: 50%;
-        background: rgba(255, 255, 255, 0.04);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 1rem;
-        border: 1px solid var(--border-color);
-        flex-shrink: 0;
-    }
-    .chat-message-bubble.user .avatar {
-        background: rgba(99, 102, 241, 0.15);
-        border-color: var(--accent-indigo);
-    }
-    .chat-message-bubble.agent .avatar {
-        background: rgba(6, 182, 212, 0.15);
-        border-color: var(--accent-cyan);
-    }
-    .message-content-wrapper {
-        display: flex;
-        flex-direction: column;
-        gap: 0.15rem;
-    }
-    .chat-message-bubble.user .message-content-wrapper {
-        align-items: flex-end;
-    }
-    .sender-label {
-        font-size: 0.65rem;
-        font-weight: 600;
-        color: var(--text-muted);
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-    }
-    .message-text {
-        padding: 0.5rem 0.75rem;
-        border-radius: 10px;
-        font-size: 0.8rem;
-        line-height: 1.4;
-    }
-    .chat-message-bubble.user .message-text {
-        background: var(--accent-indigo);
-        color: #ffffff;
-        border-top-right-radius: 2px;
-    }
-    .chat-message-bubble.agent .message-text {
-        background: rgba(255, 255, 255, 0.02);
-        color: var(--text-primary);
-        border: 1px solid var(--border-color);
-        border-top-left-radius: 2px;
-    }
-    
-    .chat-image-wrapper {
-        margin: 0.5rem 0;
-        border-radius: 6px;
-        overflow: hidden;
-        border: 1px solid var(--border-glass);
-        max-width: 100%;
-        background: #020306;
-    }
-    .chat-embedded-img {
-        max-width: 100%;
-        max-height: 180px;
-        object-fit: contain;
-        display: block;
-    }
-
-    .chat-input-bar {
-        display: flex;
-        gap: 0.5rem;
-        padding: 0.65rem;
-        background: rgba(0, 0, 0, 0.2);
-        border-top: 1px solid var(--border-color);
-    }
-    .chat-input {
-        flex: 1;
-        background: rgba(255, 255, 255, 0.02);
-        border: 1px solid var(--border-color);
-        border-radius: 6px;
-        color: var(--text-primary);
-        padding: 0.45rem 0.75rem;
-        font-size: 0.8rem;
-        transition: var(--transition-smooth);
-    }
-    .chat-input:focus {
-        outline: none;
-        border-color: var(--border-color-hover);
-        background: rgba(255, 255, 255, 0.04);
-    }
-    .btn {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        font-family: var(--font-sans);
-        font-size: 0.75rem;
-        font-weight: 600;
-        padding: 0.45rem 0.85rem;
-        border-radius: 6px;
-        border: 1px solid transparent;
-        cursor: pointer;
-        transition: all var(--transition-smooth);
-        gap: 0.35rem;
-    }
-    .btn-accent {
-        background: var(--accent-indigo);
-        color: white;
-    }
-    .btn:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-    }
-    .btn-send {
-        padding: 0 1rem;
-    }
-    .typing-indicator {
-        display: flex;
-        align-items: center;
-        gap: 0.35rem;
-        padding: 0.25rem 0.1rem;
-    }
-    .typing-indicator span {
-        width: 6px;
-        height: 6px;
-        background-color: #818cf8; /* Bright indigo */
-        border-radius: 50%;
-        display: inline-block;
-        animation: float 1.2s ease-in-out infinite;
-    }
-    .typing-indicator span:nth-child(2) { animation-delay: .2s; }
-    .typing-indicator span:nth-child(3) { animation-delay: .4s; }
-
     @keyframes float {
-        0%, 100% {
-            transform: translateY(0);
-            opacity: 0.4;
-        }
-        50% {
-            transform: translateY(-5px);
-            opacity: 1;
-            filter: drop-shadow(0 0 3px rgba(129, 140, 248, 0.8));
-        }
+        0%, 100% { transform: translateY(0); opacity: 0.4; }
+        50% { transform: translateY(-3px); opacity: 1; }
     }
+    .dot-float { animation: float 1.2s ease-in-out infinite; }
+    .dot-delay-1 { animation-delay: 0.2s; }
+    .dot-delay-2 { animation-delay: 0.4s; }
 </style>

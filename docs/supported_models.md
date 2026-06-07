@@ -55,16 +55,6 @@ This document lists the models that are actually wired into this Hawkeye workspa
 
 Note: upstream RF-DETR detection `XL` and `2XL` exist in the `rfdetr[plus]` package, but they are not installed by this skill by default because of their separate PML 1.0 license path.
 
-## Analysis Skills
-
-### Visual Event Analyzer
-
-- **Skill**: [`skills/analysis/visual-event-analyzer`](../skills/analysis/visual-event-analyzer/)
-- **Purpose**: Event-driven VLM scene summaries, threat policy analysis, and natural-language alerts
-- **VLM backends**:
-  - Moondream Cloud (HTTP API)
-  - Local Hawkeye VLM (OpenAI-compatible llama-server, default port 5405)
-
 ## Hardware Support In This Workspace
 
 | Backend | Used by |

@@ -506,7 +506,7 @@ impl RecordingManager {
             ]
         };
 
-        let output_pattern = ram_buffer_dir.join("segment_%Y-%m-%dT%H-%M-%S.mp4");
+        let output_pattern = ram_buffer_dir.join("segment_%Y-%m-%dT%H-%M-%S.ts");
 
         let mut args = vec![
             "-hide_banner".to_string(),
@@ -623,7 +623,7 @@ impl RecordingManager {
                     };
 
                     // Check if it's a segmented video file
-                    if !filename.starts_with("segment_") || !filename.ends_with(".mp4") {
+                    if !filename.starts_with("segment_") || !filename.ends_with(".ts") {
                         continue;
                     }
 
