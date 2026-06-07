@@ -383,6 +383,7 @@
             <div
                 class="w-full max-w-xl panel !p-0 overflow-hidden"
                 role="dialog"
+                tabindex="-1"
                 aria-modal="true"
                 aria-label="Command palette"
                 onclick={(e) => e.stopPropagation()}

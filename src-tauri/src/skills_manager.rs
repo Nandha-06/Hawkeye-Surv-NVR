@@ -1030,7 +1030,7 @@ impl SkillsManager {
         if !skill_abs_path.join(".deployed").exists() {
             let venv_path = skill_abs_path.join(".venv");
             if venv_path.exists() {
-                if let Err(e) = tokio::fs::remove_dir_all(&venv_path).await {
+                if let Err(_e) = tokio::fs::remove_dir_all(&venv_path).await {
                     send_progress("progress", "Cleaning up locked files...");
                     // If locked, attempt to kill any processes running inside this .venv
                     if cfg!(target_os = "windows") {

@@ -848,6 +848,7 @@
     <div class="flex-1 flex overflow-hidden relative">
 
         <!-- ─── Video player area ─── -->
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div class="flex-1 flex flex-col min-w-0" id="review-player-wrapper"
             onmousemove={handleMouseMovePlayer}
         >
@@ -895,11 +896,15 @@
                     >
                         <!-- Progress bar -->
                         <div class="px-3 pt-4 pb-1 group/progress">
+                            <!-- svelte-ignore a11y_click_events_have_key_events -->
                             <div class="relative h-1 group-hover/progress:h-1.5 transition-all cursor-pointer rounded-full overflow-hidden bg-white/20"
                                 onclick={handleProgressClick}
                                 role="slider"
                                 tabindex="-1"
                                 aria-label="Video progress"
+                                aria-valuenow={videoDuration > 0 ? Math.round((videoCurrentTime / videoDuration) * 100) : 0}
+                                aria-valuemin="0"
+                                aria-valuemax="100"
                             >
                                 <!-- Buffered -->
                                 <div class="absolute inset-y-0 left-0 bg-white/15 rounded-full"
@@ -1053,6 +1058,7 @@
                     </div>
 
                     <!-- Main timeline track -->
+                    <!-- svelte-ignore a11y_click_events_have_key_events -->
                     <div
                         bind:this={timelineEl}
                         class="relative w-full h-10 rounded-md bg-surface-2 border border-border/50 cursor-crosshair overflow-hidden"
@@ -1062,6 +1068,9 @@
                         role="slider"
                         tabindex="-1"
                         aria-label="Recording timeline"
+                        aria-valuenow={videoDuration > 0 ? Math.round((videoCurrentTime / videoDuration) * 100) : 0}
+                        aria-valuemin="0"
+                        aria-valuemax="100"
                     >
                         <!-- Hour grid lines -->
                         {#each hourMarkers as marker}
@@ -1150,7 +1159,7 @@
                             <p class="text-[10px] text-muted-foreground font-mono">FFmpeg · Zero-reencode · Lossless stream copy</p>
                         </div>
                     </div>
-                    <button onclick={() => showExportPanel = false} class="btn-icon !w-7 !h-7">
+                    <button onclick={() => showExportPanel = false} class="btn-icon !w-7 !h-7" aria-label="Close export panel">
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
                     </button>
                 </div>

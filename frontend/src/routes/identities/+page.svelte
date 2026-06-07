@@ -537,7 +537,7 @@
                     <h3 class="text-sm font-display font-semibold text-foreground">Identity Verification</h3>
                     <p class="text-[11px] text-muted-foreground mt-0.5">Associate stranger profile with a known verified name.</p>
                 </div>
-                <button onclick={() => activeRenameProfile = null} class="btn-icon !w-8 !h-8">
+                <button onclick={() => activeRenameProfile = null} class="btn-icon !w-8 !h-8" aria-label="Close identity verification">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                         <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
                     </svg>
@@ -567,7 +567,6 @@
                         bind:value={newProfileName}
                         placeholder="e.g. John Doe"
                         class="input"
-                        autofocus
                         onkeydown={(e) => {
                             if (e.key === 'Enter') handleRename();
                             if (e.key === 'Escape') activeRenameProfile = null;

@@ -452,6 +452,7 @@
                                         </div>
                                     </td>
                                     <td class="px-5 py-2.5 text-right">
+                                        <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
                                         <div class="flex items-center justify-end gap-1" onclick={(e) => e.stopPropagation()}>
                                             <a
                                                 href="/review?camera_id={ev.camera_id}&timestamp={ev.timestamp}&play=true"
@@ -564,11 +565,14 @@
             onclick={() => selectedSnapshotEvent = null}
             role="presentation"
         >
+            <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
             <div
                 class="panel !p-0 max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col"
                 in:fly={{ y: 16, duration: 220 }}
                 onclick={(e) => e.stopPropagation()}
+                onkeydown={(e) => { if (e.key === 'Escape') selectedSnapshotEvent = null; }}
                 role="dialog"
+                tabindex="-1"
             >
                 <div class="px-5 h-14 border-b border-border flex items-center justify-between">
                     <div class="flex items-center gap-3 min-w-0">
@@ -581,7 +585,7 @@
                             <p class="text-[10px] text-muted-foreground font-mono mt-0.5">{selectedSnapshotEvent.camera_id} · {formatDateFriendly(selectedSnapshotEvent.timestamp)} {formatTime(selectedSnapshotEvent.timestamp)}</p>
                         </div>
                     </div>
-                    <button class="btn-icon" onclick={() => selectedSnapshotEvent = null}>
+                    <button class="btn-icon" onclick={() => selectedSnapshotEvent = null} aria-label="Close snapshot viewer">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                     </button>
                 </div>

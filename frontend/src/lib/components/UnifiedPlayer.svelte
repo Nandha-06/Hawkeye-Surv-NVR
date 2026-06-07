@@ -382,13 +382,14 @@
         {/if}
 
         <!-- SVG overlay for drawing and display polygons (zones/masks) -->
-        <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+        <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
         <svg
             class="absolute inset-0 w-full h-full {drawingMode !== 'none' ? 'cursor-crosshair bg-black/35' : 'pointer-events-none'}"
             role="application"
             aria-label="Drawing canvas for surveillance zones and masks"
             tabindex="-1"
             onclick={handleOverlayClick}
+            onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleOverlayClick(e); }}
         >
             <!-- Display Saved Masks -->
             {#each drawnMasks as mask}
