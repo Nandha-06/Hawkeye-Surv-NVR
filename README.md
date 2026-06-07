@@ -1,36 +1,18 @@
 <div align="center">
-<h1>Hawkeye — Open-Source AI Camera Platform</h1>
+<h1>Hawkeye — Intelligent Surveillance System</h1>
 
-<p>Hawkeye is an open-source AI camera platform that transforms any camera into an intelligent security and monitoring system. It provides local AI inference for scene analysis, object detection, person re-identification, and more — running entirely on your own hardware with models like Qwen, DeepSeek, SmolVLM, and LLaVA. Built on proven facial recognition, RE-ID, fall detection, and CCTV/NVR surveillance monitoring, the skill catalog extends these machine learning capabilities with modern AI. All inference runs locally for maximum privacy.</p>
-
-<p>
-    <a href="https://join.slack.com/t/sharpai/shared_invite/zt-1nt1g0dkg-navTKx6REgeq5L3eoC1Pqg">
-        <img src="https://img.shields.io/badge/slack-purple?style=for-the-badge&logo=slack" height=25>
-    </a>
-    <a href="https://github.com/SharpAI/Hawkeye/issues">
-        <img src="https://img.shields.io/badge/support%20forums-navy?style=for-the-badge&logo=github" height=25>
-    </a>
-    <a href="https://github.com/SharpAI/Hawkeye/releases">
-        <img alt="GitHub release" src="https://img.shields.io/github/release/SharpAI/Hawkeye.svg?style=for-the-badge" height=25>
-    </a>
-    <a href="https://pypi.python.org/pypi/sharpai-hub">
-        <img alt="Pypi release" src="https://img.shields.io/pypi/v/sharpai-hub.svg?style=for-the-badge" height=25>
-    </a>
-    <a href="https://pepy.tech/project/sharpai-hub">
-        <img alt="download" src=https://static.pepy.tech/personalized-badge/sharpai-hub?period=total&units=international_system&left_color=grey&right_color=orange&left_text=Downloads height=25>
-    </a>
-</p>
+<p>Hawkeye is an intelligent surveillance system that transforms any camera into a smart monitoring solution. It provides local AI inference for scene analysis, object detection, person re-identification, and more — running entirely on your own hardware with models like Qwen, DeepSeek, SmolVLM, and LLaVA. Built on proven facial recognition, RE-ID, fall detection, and CCTV/NVR surveillance monitoring, the skill catalog extends these machine learning capabilities with modern AI. All inference runs locally for maximum privacy.</p>
 </div>
 
 ---
 
 <div align="center">
 
-### 🛡️ Introducing Hawkeye Desktop App
+### Introducing the Hawkeye Desktop Application
 
-**Use Hawkeye's AI skills through a desktop app with LLM-powered setup, agent chat, and smart alerts — connected to your mobile via Discord / Telegram / Slack.**
+**Hawkeye features a native desktop application that simplifies AI-powered camera configuration, smart alerting, and real-time monitoring.**
 
-Hawkeye is the desktop companion for your AI camera platform. It uses LLM to automatically set up your environment, configure camera skills, and manage the full AI pipeline — no manual Docker or CLI required. It also adds an intelligent agent layer: persistent memory, agentic chat with your cameras, AI video generation, voice (TTS), and conversational messaging via Discord / Telegram / Slack.
+The Hawkeye Desktop App serves as a comprehensive control center for your local camera streams. Utilizing modern AI models, it automatically detects hardware capabilities, installs required dependencies, and sets up camera skills without manual steps. It also provides advanced alert systems and seamless integration with communication platforms to keep you informed.
 
 </div>
 
@@ -137,7 +119,7 @@ Each skill is a self-contained module with its own model, parameters, and [commu
 | **Streaming** | [`go2rtc-cameras`](skills/streaming/go2rtc-cameras/) | Registers RTSP streams with go2rtc for low-latency Web也比. live views |
 | **Channels** | [`telegram`](skillsfriend/channels/telegram/) · [`signal`](skills/channels/signal/) · [`matrix`](skills/channels/matrix/) · [`line`](skills/channels/line/) | Messaging channels for the agent — alerts, search, control |
 | **Automation** | [`mqtt`](skills/automation/mqtt/) · [`webhook`](skills/automation/webhook/) · [`ha-trigger`](skills/automation/ha-trigger/) | Event-driven automation triggers |
-| **Integrations** | [`homeassistant-bridge`](skills/integrations/homeassistant-bridge/) · [`camera-claw`](https://github.com/SharpAI/CameraClaw) | HA cameras in ↔ detection results out · OpenClaw security sandbox |
+| **Integrations** | [`homeassistant-bridge`](skills/integrations/homeassistant-bridge/) · `camera-claw` | HA cameras in ↔ detection results out · OpenClaw security sandbox |
 
 > **Registry:** All skills are indexed in [`skills.json`](skills.json) for programmatic discovery.
 
@@ -249,35 +231,7 @@ Camera → Frame Governor → detect.py (JSONL) → Hawkeye IPC → Live Overlay
 - ⚡ **Auto start** — set `auto_start: true` to begin detecting when Hawkeye launches
 
 
-## 📦 More Applications
 
-<details>
-<summary><b>Legacy Applications (SharpAI-Hub CLI)</b></summary>
-
-These applications use the `sharpai-cli` Docker-based workflow.
-For the modern experience, use Hawkeye.
-
-| Application | CLI Command | Platforms |
-|-------------|-------------|-----------|
-| Person Detector | `sharpai executed yolov7_person_detector start` | Jetson/Windows/Linux/macOS |
-| Screen Monitor | `sharpai-cli screen_monitor start` | Windows/Linux/macOS |
-| Parking Monitor | `sharpai-cli yoloparking start` | Jetson AGX |
-
-📖 [Detailed setup guides →](docs/legacy-applications.md)
-
-#### Tested Devices
-- **Edge**: Jetson Nano, Xavier AGX, Raspberry Pi 4/8GB
-- **Desktop**: macOS, Windows 11, Ubuntu 20.04
-- **MCU**: ESP32 CAM, ESP32-S3-Eye
-
-#### Tested Cameras
-- RTSP: DaHua, Lorex, Amcrest
-- Cloud: Blink, Nest (via Home Assistant)
-- Mobile: IP Camera Lite (iOS)
-
-</details>
-
----
 
 <details>
 <summary><h2>🏗️ System Infrastructure</h2></summary>
@@ -290,9 +244,7 @@ For the modern experience, use Hawkeye.
 
 ## 🤝 Support & Community
 
-- 💬 [Slack Community](https://join.slack.com/t/sharpai/shared_invite/zt-1nt1g0dkg-navTKx6REgeq5L3eoC1Pqg) — help, discussions, and camera setup assistance
-- 🐛 [GitHub Issues](https://github.com/SharpAI/Hawkeye/issues) — technical support and bug reports
-- 🏢 [Commercial Support](https://join.slack.com/t/sharpai/shared_invite/zt-1nt1g0dkg-navTKx6REgeq5L3eoC1Pqg) — pipeline optimization, custom models, edge deployment
+- 🐛 [GitHub Issues](https://github.com/Nandha-06/Hawkeye-Surv-NVR/issues) — technical support and bug reports
 
 
 ## [Contributions](Contributions.md)
