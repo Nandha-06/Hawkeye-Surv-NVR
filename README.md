@@ -6,21 +6,7 @@
 
 ---
 
-<div align="center">
 
-### Introducing the Hawkeye Desktop Application
-
-**Hawkeye features a native desktop application that simplifies AI-powered camera configuration, smart alerting, and real-time monitoring.**
-
-The Hawkeye Desktop App serves as a comprehensive control center for your local camera streams. Utilizing modern AI models, it automatically detects hardware capabilities, installs required dependencies, and sets up camera skills without manual steps. It also provides advanced alert systems and seamless integration with communication platforms to keep you informed.
-
-</div>
-
-<p align="center">
-<a href="https://youtu.be/BtHpenIO5WU"><img src="screenshots/hawkeye-benchmark-demo.gif" alt="Hawkeye AI Benchmark Demo — Local LLM home security on Apple Silicon (click for full video)" width="60%"></a>
-</p>
-
----
 
 ## 🏗️ Architecture
 
