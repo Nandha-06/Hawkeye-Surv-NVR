@@ -316,12 +316,14 @@ class MotionDetector:
         self.motion_masks = motion_masks
         self.avg_frame = None
         self.mask_img = None
+        self.crop_box = None
 
     def has_motion(self, frame_bgr) -> bool:
         import cv2
         import numpy as np
 
         gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
+        
         if self.mask_img is None:
             h, w = frame_bgr.shape[:2]
             self.mask_img = np.ones((h, w), dtype=np.uint8) * 255
@@ -331,15 +333,32 @@ class MotionDetector:
                     cv2.fillPoly(self.mask_img, [pts], 0)
                 except Exception as exc:
                     log(f"Motion mask parse error: {exc}")
+            
+            # Find the bounding box of the non-zero mask to optimize blurring
+            y_indices, x_indices = np.where(self.mask_img > 0)
+            if len(y_indices) > 0 and len(x_indices) > 0:
+                self.crop_box = (
+                    np.min(y_indices), np.max(y_indices) + 1,
+                    np.min(x_indices), np.max(x_indices) + 1
+                )
+            else:
+                self.crop_box = (0, h, 0, w)
 
-        cv2.bitwise_and(gray, self.mask_img, dst=gray)
-        gray = cv2.GaussianBlur(gray, (21, 21), 0)
+        y1, y2, x1, x2 = self.crop_box
+        
+        # Apply crop BEFORE blur
+        gray_cropped = gray[y1:y2, x1:x2]
+        mask_cropped = self.mask_img[y1:y2, x1:x2]
+        
+        cv2.bitwise_and(gray_cropped, mask_cropped, dst=gray_cropped)
+        gray_cropped = cv2.GaussianBlur(gray_cropped, (21, 21), 0)
+        
         if self.avg_frame is None:
-            self.avg_frame = gray.copy().astype("float")
+            self.avg_frame = gray_cropped.copy().astype("float")
             return False
 
-        cv2.accumulateWeighted(gray, self.avg_frame, 0.5)
-        frame_delta = cv2.absdiff(gray, cv2.convertScaleAbs(self.avg_frame))
+        cv2.accumulateWeighted(gray_cropped, self.avg_frame, 0.5)
+        frame_delta = cv2.absdiff(gray_cropped, cv2.convertScaleAbs(self.avg_frame))
         thresh = cv2.threshold(frame_delta, self.threshold, 255, cv2.THRESH_BINARY)[1]
         thresh = cv2.dilate(thresh, None, iterations=2)
         contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -394,7 +413,7 @@ class RfDetrRunner:
         self.processor = AutoImageProcessor.from_pretrained(self.model_id)
 
         dtype = None
-        use_half = as_bool(self.config.get("half_precision"), default=False) and self.device.type == "cuda"
+        use_half = self.device.type in ["cuda", "mps"]
         if use_half:
             dtype = torch.float16
 
