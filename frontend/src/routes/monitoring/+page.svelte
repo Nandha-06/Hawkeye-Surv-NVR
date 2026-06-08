@@ -68,6 +68,7 @@
     let captureCanvases: Record<string, HTMLCanvasElement> = {};
     let webrtcConnections: Record<string, RTCPeerConnection> = {};
     let webrtcStreams: Record<string, MediaStream> = {};
+    let waitingForFrameAck: Record<string, boolean> = {};
 
     interface ActiveBrowserRecorder {
         recorder: MediaRecorder;
@@ -188,6 +189,7 @@
         }
     });
 
+
     onDestroy(() => {
         stopWebcams();
         for (const camera of enabledCameras) {
@@ -236,22 +238,58 @@
 
             const intervalMs = Math.max(200, Math.round(1000 / (camera.fps || 5)));
             let frameId = 0;
-            webcamIntervals[camera.id] = setInterval(() => {
+            
+            const captureNext = () => {
                 if (activeSkillStatus !== 'ready' || !ws || ws.readyState !== WebSocket.OPEN) return;
-                if (!video || video.readyState < video.HAVE_CURRENT_DATA) return;
+                if (!video || video.readyState < video.HAVE_CURRENT_DATA) {
+                    webcamIntervals[camera.id] = setTimeout(captureNext, intervalMs) as any;
+                    return;
+                }
+
+                if (waitingForFrameAck[camera.id]) {
+                    // Frame in flight, wait for ack
+                    return;
+                }
 
                 const ctx = canvas.getContext('2d');
                 if (!ctx) return;
                 ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-                ws.send(JSON.stringify({
-                    action: 'feed_frame',
-                    skillId: selectedSkillId,
-                    cameraId: camera.id,
-                    frameId: frameId++,
-                    frame: canvas.toDataURL('image/jpeg', 0.72),
-                    timestamp: new Date().toISOString()
-                }));
-            }, intervalMs);
+                
+                waitingForFrameAck[camera.id] = true;
+                
+                canvas.toBlob((blob) => {
+                    if (!blob) {
+                        waitingForFrameAck[camera.id] = false;
+                        webcamIntervals[camera.id] = setTimeout(captureNext, intervalMs) as any;
+                        return;
+                    }
+                    blob.arrayBuffer().then((imgBuffer) => {
+                        const meta = JSON.stringify({
+                            action: 'feed_frame',
+                            skillId: selectedSkillId,
+                            cameraId: camera.id,
+                            frameId: frameId++,
+                            timestamp: new Date().toISOString()
+                        });
+                        
+                        const metaBytes = new TextEncoder().encode(meta);
+                        const payload = new Uint8Array(4 + metaBytes.length + imgBuffer.byteLength);
+                        
+                        const dv = new DataView(payload.buffer);
+                        dv.setUint32(0, metaBytes.length, true); // Little endian
+                        
+                        payload.set(metaBytes, 4);
+                        payload.set(new Uint8Array(imgBuffer), 4 + metaBytes.length);
+                        
+                        ws.send(payload);
+                    }).catch(() => { waitingForFrameAck[camera.id] = false; });
+                }, 'image/jpeg', 0.72);
+                
+                // Still schedule the next check just in case, but ack handles primary loop
+                webcamIntervals[camera.id] = setTimeout(captureNext, intervalMs) as any;
+            };
+            
+            captureNext();
 
             syncBrowserRecorders();
         } catch (err) {
@@ -260,7 +298,7 @@
     }
 
     function stopWebcams() {
-        for (const interval of Object.values(webcamIntervals)) clearInterval(interval);
+        for (const interval of Object.values(webcamIntervals)) clearTimeout(interval);
         webcamIntervals = {};
         for (const cameraId of Object.keys(browserRecorders)) stopBrowserRecording(cameraId);
         for (const stream of Object.values(webcamStreams)) stream.getTracks().forEach(track => track.stop());
@@ -653,6 +691,7 @@
                         activeSkillStatus = 'stopped';
                     }
                     if (data.event === 'detections' && data.skillId === selectedSkillId) {
+                        waitingForFrameAck[data.cameraId] = false;
                         updateDetectionFps();
                         motionGatedCameras[data.cameraId] = !!data.motion_gated;
                         drawDetections(data.cameraId, data.objects || []);

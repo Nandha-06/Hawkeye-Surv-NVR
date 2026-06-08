@@ -910,6 +910,15 @@ impl SkillsManager {
                     "[SkillsManager] Subprocess {} finished execution.",
                     active_key_clone
                 );
+                
+                let stopped_event = serde_json::json!({
+                    "event": "stopped",
+                    "skillId": skill_id_str,
+                    "cameraId": camera_id_str
+                });
+                if let Ok(msg_str) = serde_json::to_string(&stopped_event) {
+                    let _ = tx.send(msg_str);
+                }
             });
         }
 

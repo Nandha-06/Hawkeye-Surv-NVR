@@ -137,12 +137,39 @@ if not _env_config_loaded:
 
         def load_optimized(self, model_name, use_optimized=True):
             import time as _t
+            import os
+            from pathlib import Path
             from ultralytics import YOLO
             t0 = _t.perf_counter()
-            model = YOLO(f"{model_name}.pt")
-            model.to(self.device)
+
+            hawkeye_root = Path(__file__).resolve().parent.parent.parent.parent.parent
+            
+            # Prefer ONNX if optimized is requested
+            format_ext = ".onnx" if use_optimized else ".pt"
+            model_path = hawkeye_root / f"{model_name}{format_ext}"
+            
+            if not model_path.exists():
+                # Fallback to current dir
+                model_path = Path(f"{model_name}{format_ext}")
+                if not model_path.exists() and use_optimized:
+                    # Fallback to .pt if .onnx doesn't exist
+                    model_path = hawkeye_root / f"{model_name}.pt"
+                    if not model_path.exists():
+                        model_path = Path(f"{model_name}.pt")
+
+            model = YOLO(str(model_path))
+            
+            # .to() works natively on .pt, but we wrap in try for exported models
+            try:
+                model.to(self.device)
+            except Exception:
+                pass
+                
             self.load_ms = (_t.perf_counter() - t0) * 1000
-            return model, "pytorch"
+            
+            final_format = "onnx" if str(model_path).endswith(".onnx") else "pytorch"
+            self.export_format = final_format
+            return model, final_format
 
         def to_dict(self):
             return {"backend": self.backend, "device": self.device}
@@ -811,6 +838,7 @@ def main():
                 self.motion_masks = motion_masks
                 self.avg_frame = None
                 self.mask_img = None
+                self.crop_box = None
                 self.alpha = 0.05  # accumulateWeighted learning rate
 
             def has_motion(self, frame_bgr):
@@ -824,6 +852,7 @@ def main():
                 # Lazy-initialize binary exclusion mask scaled to downscaled dimensions
                 if self.mask_img is None:
                     self.mask_img = np.ones((dh, dw), dtype=np.uint8) * 255
+                    self.crop_box = (0, dh, 0, dw)
                     if self.motion_masks:
                         for poly in self.motion_masks:
                             try:
@@ -831,9 +860,22 @@ def main():
                                 cv2.fillPoly(self.mask_img, [pts], 0) # Fill black to mask out motion
                             except Exception as e:
                                 log(f"Error drawing motion mask polygon {poly}: {e}")
+                        # Calculate tight bounding box of non-zero pixels
+                        nz = np.nonzero(self.mask_img)
+                        if nz[0].size > 0:
+                            self.crop_box = (np.min(nz[0]), np.max(nz[0])+1, np.min(nz[1]), np.max(nz[1])+1)
+                        else:
+                            self.crop_box = (0, 0, 0, 0)
                 
-                if self.mask_img is not None:
-                    cv2.bitwise_and(gray, self.mask_img, dst=gray)
+                y1, y2, x1, x2 = self.crop_box
+                if y2 <= y1 or x2 <= x1:
+                    return False
+                    
+                gray = gray[y1:y2, x1:x2]
+                
+                if self.motion_masks:
+                    mask_cropped = self.mask_img[y1:y2, x1:x2]
+                    cv2.bitwise_and(gray, mask_cropped, dst=gray)
 
                 # 2. Gaussian Blur to filter noise
                 gray = cv2.GaussianBlur(gray, (9, 9), 0)
@@ -847,11 +889,9 @@ def main():
                 frame_delta = cv2.absdiff(gray, cv2.convertScaleAbs(self.avg_frame))
                 
                 # 4. Adaptive contrast calculation: find 96th percentile of difference values
-                # If there are lighting fluctuations, the percentile climbs and raises the threshold
                 flat_delta = frame_delta.flatten()
                 if len(flat_delta) > 0:
                     p96 = np.percentile(flat_delta, 96)
-                    # dynamic threshold scale
                     dynamic_thresh = max(self.threshold, int(p96 * 1.5))
                 else:
                     dynamic_thresh = self.threshold
@@ -1242,7 +1282,8 @@ def main():
                 try:
                     # ─── 1. YOLO inference ───
                     t0 = time.perf_counter()
-                    results = model(frame_img, conf=confidence, verbose=False)
+                    use_half = env.device in ["cuda", "mps"]
+                    results = model(frame_img, conf=confidence, verbose=False, half=use_half)
                     perf.record("inference", (time.perf_counter() - t0) * 1000)
 
                     # ─── 2. Parse detections ───
@@ -1369,6 +1410,26 @@ def main():
 
                     perf.record("fusion", (time.perf_counter() - t0) * 1000)
 
+                    # Find the most prominent object to crop for snapshot
+                    best_crop = None
+                    best_area = 0
+                    for obj in objects_out:
+                        x1, y1, x2, y2 = obj["bbox"]
+                        area = (x2 - x1) * (y2 - y1)
+                        if area > best_area:
+                            best_area = area
+                            # Pad the bounding box slightly for context
+                            pad_x = int((x2 - x1) * 0.2)
+                            pad_y = int((y2 - y1) * 0.2)
+                            cx1, cy1 = max(0, int(x1 - pad_x)), max(0, int(y1 - pad_y))
+                            cx2, cy2 = min(w, int(x2 + pad_x)), min(h, int(y2 + pad_y))
+                            if cx2 > cx1 and cy2 > cy1:
+                                best_crop = frame_img[cy1:cy2, cx1:cx2].copy()
+
+                    snap_path = None
+                    if best_crop is not None:
+                        snap_path = save_snapshot_jpg(best_crop, camera_id)
+
                     # ─── 6. Emit detections ───
                     t0 = time.perf_counter()
                     _payload = {
@@ -1378,6 +1439,8 @@ def main():
                         "timestamp": timestamp,
                         "objects": objects_out,
                     }
+                    if snap_path:
+                        _payload["snapshot_path"] = snap_path
                     emit(_payload)
                     perf.record("emit", (time.perf_counter() - t0) * 1000)
 

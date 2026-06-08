@@ -45,6 +45,63 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<ServerState>) {
     // Main command receiver loop
     loop {
         match ws_receiver.next().await {
+            Some(Ok(Message::Binary(bin))) => {
+                // Format: [4 bytes JSON len, little-endian] + [JSON bytes] + [JPEG bytes]
+                if bin.len() >= 4 {
+                    let mut len_bytes = [0u8; 4];
+                    len_bytes.copy_from_slice(&bin[0..4]);
+                    let json_len = u32::from_le_bytes(len_bytes) as usize;
+                    
+                    if bin.len() >= 4 + json_len {
+                        let json_bytes = &bin[4..4 + json_len];
+                        let img_bytes = &bin[4 + json_len..];
+                        
+                        if let Ok(cmd) = serde_json::from_slice::<Value>(json_bytes) {
+                            let action = cmd["action"].as_str().unwrap_or("");
+                            if action == "feed_frame" {
+                                let state_clone = state.clone();
+                                let skill_id = cmd["skillId"].as_str().unwrap_or("").to_string();
+                                let camera_id = cmd["cameraId"].as_str().unwrap_or("").to_string();
+                                let frame_id = cmd["frameId"].as_i64().unwrap_or(0);
+                                let timestamp = cmd["timestamp"].as_str().unwrap_or("").to_string();
+                                
+                                let img_vec = img_bytes.to_vec();
+                                
+                                tokio::spawn(async move {
+                                    let proc_key = format!("{}:{}", skill_id, camera_id);
+                                    let active_processes = state_clone.skills_manager.active_processes.read().await;
+                                    if let Some(active_proc) = active_processes.get(&proc_key) {
+                                        let notify_event = serde_json::json!({
+                                            "event": "frame",
+                                            "frame_id": frame_id,
+                                            "camera_id": camera_id,
+                                            "timestamp": timestamp,
+                                        });
+                                        if let Ok(msg_str) = serde_json::to_string(&notify_event) {
+                                            let metadata_bytes = msg_str.as_bytes();
+                                            let jl = metadata_bytes.len() as u32;
+                                            let il = img_vec.len() as u32;
+
+                                            let mut lock = active_proc.stdin.lock().await;
+
+                                            // Prepare AEGS binary header: Magic (4B) + json_len (4B, Big Endian) + img_len (4B, Big Endian)
+                                            let mut header = Vec::with_capacity(12);
+                                            header.extend_from_slice(b"AEGS");
+                                            header.extend_from_slice(&jl.to_be_bytes());
+                                            header.extend_from_slice(&il.to_be_bytes());
+
+                                            let _ = lock.write_all(&header).await;
+                                            let _ = lock.write_all(metadata_bytes).await;
+                                            let _ = lock.write_all(&img_vec).await;
+                                            let _ = lock.flush().await;
+                                        }
+                                    }
+                                });
+                            }
+                        }
+                    }
+                }
+            }
             Some(Ok(Message::Text(text))) => {
                 if let Ok(cmd) = serde_json::from_str::<Value>(&text) {
                     let action = cmd["action"].as_str().unwrap_or("");
@@ -72,16 +129,31 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<ServerState>) {
                             if !skill_id.is_empty() {
                                 let state_clone = state.clone();
                                 tokio::spawn(async move {
-                                    let _ = state_clone
+                                    match state_clone
                                         .skills_manager
                                         .start_skill(&skill_id, config)
-                                        .await;
-                                    let reply = serde_json::json!({
-                                        "event": "ready",
-                                        "skillId": skill_id
-                                    });
-                                    if let Ok(reply_str) = serde_json::to_string(&reply) {
-                                        let _ = state_clone.tx.send(reply_str);
+                                        .await
+                                    {
+                                        Ok(_) => {
+                                            let reply = serde_json::json!({
+                                                "event": "ready",
+                                                "skillId": skill_id
+                                            });
+                                            if let Ok(reply_str) = serde_json::to_string(&reply) {
+                                                let _ = state_clone.tx.send(reply_str);
+                                            }
+                                        }
+                                        Err(err) => {
+                                            log::error!("Failed to start skill {}: {}", skill_id, err);
+                                            let reply = serde_json::json!({
+                                                "event": "error",
+                                                "skillId": skill_id,
+                                                "message": format!("Failed to start skill: {}", err)
+                                            });
+                                            if let Ok(reply_str) = serde_json::to_string(&reply) {
+                                                let _ = state_clone.tx.send(reply_str);
+                                            }
+                                        }
                                     }
                                 });
                             }
