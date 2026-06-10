@@ -5,6 +5,7 @@ pub fn ensure_database(data_dir: &Path) -> Result<(), rusqlite::Error> {
     let _ = std::fs::create_dir_all(data_dir);
     let db_path = data_dir.join("hawkeye.db");
     let conn = Connection::open(db_path)?;
+    conn.busy_timeout(std::time::Duration::from_secs(5))?;
     conn.execute_batch(
         r#"
         PRAGMA journal_mode = WAL;

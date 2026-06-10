@@ -14,6 +14,10 @@ use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 
 pub async fn handle_socket(socket: WebSocket, state: Arc<ServerState>) {
+    const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
+    const MAX_COMMAND_BYTES: usize = 256 * 1024;
+    const MAX_TEXT_FRAME_BYTES: usize = 24 * 1024 * 1024;
+
     let (mut ws_sender, mut ws_receiver) = socket.split();
     let (tx_ws, mut rx_ws) = tokio::sync::mpsc::channel::<Message>(100);
     let mut rx = state.tx.subscribe();
@@ -46,6 +50,14 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<ServerState>) {
     loop {
         match ws_receiver.next().await {
             Some(Ok(Message::Binary(bin))) => {
+                if bin.len() > MAX_FRAME_BYTES {
+                    let _ = tx_ws
+                        .send(Message::Text(
+                            r#"{"event":"error","message":"Binary frame exceeds 16 MiB limit"}"#.to_string(),
+                        ))
+                        .await;
+                    continue;
+                }
                 // Format: [4 bytes JSON len, little-endian] + [JSON bytes] + [JPEG bytes]
                 if bin.len() >= 4 {
                     let mut len_bytes = [0u8; 4];
@@ -103,23 +115,41 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<ServerState>) {
                 }
             }
             Some(Ok(Message::Text(text))) => {
+                if text.len() > MAX_TEXT_FRAME_BYTES {
+                    let _ = tx_ws
+                        .send(Message::Text(
+                            r#"{"event":"error","message":"Text frame exceeds 24 MiB limit"}"#.to_string(),
+                        ))
+                        .await;
+                    continue;
+                }
                 if let Ok(cmd) = serde_json::from_str::<Value>(&text) {
                     let action = cmd["action"].as_str().unwrap_or("");
+                    if text.len() > MAX_COMMAND_BYTES && action != "feed_frame" {
+                        let _ = tx_ws
+                            .send(Message::Text(
+                                r#"{"event":"error","message":"Command exceeds 256 KiB limit"}"#.to_string(),
+                            ))
+                            .await;
+                        continue;
+                    }
                     match action {
                         "list_skills" => {
                             let tx_ws_clone = tx_ws.clone();
                             let state_clone = state.clone();
                             tokio::spawn(async move {
-                                if let Ok(skills_catalog) =
-                                    state_clone.skills_manager.list_skills().await
-                                {
-                                    let reply = serde_json::json!({
+                                let reply = match state_clone.skills_manager.list_skills().await {
+                                    Ok(skills_catalog) => serde_json::json!({
                                         "event": "skills_list",
                                         "skills": skills_catalog["skills"]
-                                    });
-                                    if let Ok(reply_str) = serde_json::to_string(&reply) {
-                                        let _ = tx_ws_clone.send(Message::Text(reply_str)).await;
-                                    }
+                                    }),
+                                    Err(err) => serde_json::json!({
+                                        "event": "error",
+                                        "message": format!("Failed to load skill catalog: {}", err)
+                                    }),
+                                };
+                                if let Ok(reply_str) = serde_json::to_string(&reply) {
+                                    let _ = tx_ws_clone.send(Message::Text(reply_str)).await;
                                 }
                             });
                         }
@@ -136,7 +166,7 @@ pub async fn handle_socket(socket: WebSocket, state: Arc<ServerState>) {
                                     {
                                         Ok(_) => {
                                             let reply = serde_json::json!({
-                                                "event": "ready",
+                                                "event": "starting",
                                                 "skillId": skill_id
                                             });
                                             if let Ok(reply_str) = serde_json::to_string(&reply) {

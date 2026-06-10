@@ -187,14 +187,21 @@
 
     onMount(fetchCameras);
 
+    let notificationTimeout: number | undefined;
+
     function showNotification(msg: string, type: 'success' | 'error' | 'info') {
         message = msg;
         messageType = type;
-        setTimeout(() => {
+        if (notificationTimeout) clearTimeout(notificationTimeout);
+        notificationTimeout = window.setTimeout(() => {
             message = '';
             messageType = '';
         }, 4000);
     }
+
+    onDestroy(() => {
+        if (notificationTimeout) clearTimeout(notificationTimeout);
+    });
 
     async function saveCameras() {
         isSaving = true;

@@ -1,7 +1,7 @@
 import onnxruntime
 import numpy as np
 
-model_path = r"C:\Users\rtnan\Desktop\DeepCamera\skills\detection\perception-core\models\scrfd_500m_bnkps.onnx"
+model_path = r"C:\Users\rtnan\desktop\hawkeye\skills\detection\perception-core\models\scrfd_500m_bnkps.onnx"
 session = onnxruntime.InferenceSession(model_path, providers=["CPUExecutionProvider"])
 
 print("Inputs:")

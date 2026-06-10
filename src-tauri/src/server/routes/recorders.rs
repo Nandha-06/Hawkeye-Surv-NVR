@@ -111,6 +111,28 @@ pub async fn stop_recorder(
 
 }
 
+// Handle bulk recorder actions (start_all / stop_all) from the frontend toggle
+pub async fn handle_recorders_action(
+    State(state): State<Arc<ServerState>>,
+    Json(payload): Json<Value>,
+) -> impl IntoResponse {
+    let action = payload["action"].as_str().unwrap_or("");
+
+    match action {
+        "start_all" => {
+            state.recording_manager.start_all().await;
+            Json(serde_json::json!({ "success": true, "message": "All recorders started" }))
+        }
+        "stop_all" => {
+            state.recording_manager.stop_all().await;
+            Json(serde_json::json!({ "success": true, "message": "All recorders stopped" }))
+        }
+        _ => {
+            Json(serde_json::json!({ "error": format!("Unknown action: {}", action) }))
+        }
+    }
+}
+
 #[derive(serde::Deserialize)]
 
 pub struct EventsQuery {
@@ -120,6 +142,8 @@ pub struct EventsQuery {
     pub label: Option<String>,
 
     pub limit: Option<usize>,
+
+    pub offset: Option<usize>,
 
     pub id: Option<String>,
 }

@@ -1,7 +1,8 @@
 <script lang="ts">
-    import { onMount, onDestroy } from 'svelte';
-    import Hls from 'hls.js';
+    import { onMount } from 'svelte';
+    import { browser } from '$app/environment';
     import { Bell, EyeOff, Radio, RotateCcw, Trash2 } from 'lucide-svelte';
+    import { getApiToken } from '$lib/apiToken';
 
     // Props
     let { camera } = $props<{ camera: any }>();
@@ -12,7 +13,7 @@
     
     // Time & Playback States
     let hlsUrl = $state('');
-    let hlsInstance: Hls | null = null;
+    let hlsInstance: any | null = null;
     let videoElement = $state<HTMLVideoElement | null>(null);
     let webRtcPc = $state<RTCPeerConnection | null>(null);
     let streamStatus = $state<'idle' | 'connecting' | 'live' | 'history' | 'error'>('idle');
@@ -28,6 +29,8 @@
     let hoverThumbnail = $state<{ id: string; x: number; y: number; timeString: string } | null>(null);
     let timelineRef = $state<HTMLDivElement | null>(null);
 
+    let apiToken = $state('');
+
     // Drawing Tool States
     let drawingMode = $state<'none' | 'mask' | 'zone'>('none');
     let newPolygonPoints = $state<{ x: number; y: number }[]>([]);
@@ -37,6 +40,10 @@
 
     onMount(() => {
         let disposed = false;
+
+        getApiToken().then(token => {
+            if (token) apiToken = token;
+        });
 
         // Load initial masks and zones from camera config
         if (camera.masks) drawnMasks = camera.masks;
@@ -158,11 +165,10 @@
                 segments = await res.json();
             }
         } catch (e) {
-            console.error('Failed to load segments:', e);
         }
     }
 
-    function playHistoryAtTime(timeMs: number) {
+    async function playHistoryAtTime(timeMs: number) {
         stopLiveStream();
         stopHls();
 
@@ -177,13 +183,14 @@
         const startIso = new Date(timeMs).toISOString();
         const endIso = new Date(Date.now()).toISOString();
 
-        // Feed index.m3u8 playlist with start/end timeframe params
-        const vodUrl = `/api/v1/recordings/vod/index.m3u8?camera_id=${camera.id}&start_time=${encodeURIComponent(startIso)}&end_time=${encodeURIComponent(endIso)}`;
+        let vodUrl = `/api/v1/recordings/vod/index.m3u8?camera_id=${camera.id}&start_time=${encodeURIComponent(startIso)}&end_time=${encodeURIComponent(endIso)}`;
+        if (apiToken) {
+            vodUrl += `&token=${encodeURIComponent(apiToken)}`;
+        }
         
         if (!videoElement) return;
 
-        console.log(`[UnifiedPlayer] Loading historical HLS URL: ${vodUrl}`);
-
+        const Hls = (await import('hls.js')).default;
         if (Hls.isSupported()) {
             const hls = new Hls();
             hls.loadSource(vodUrl);
@@ -252,12 +259,15 @@
     }
 
     // --- Polygonal Masks & Zones Drawing Tool ---
-    function handleOverlayClick(e: MouseEvent) {
+    function handleOverlayClick(e: MouseEvent | KeyboardEvent) {
         if (drawingMode === 'none') return;
         
         const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-        const x = parseFloat(((e.clientX - rect.left) / rect.width).toFixed(3));
-        const y = parseFloat(((e.clientY - rect.top) / rect.height).toFixed(3));
+        const clientX = 'clientX' in e ? e.clientX : rect.left + rect.width / 2;
+        const clientY = 'clientY' in e ? e.clientY : rect.top + rect.height / 2;
+
+        const x = parseFloat(((clientX - rect.left) / rect.width).toFixed(3));
+        const y = parseFloat(((clientY - rect.top) / rect.height).toFixed(3));
 
         newPolygonPoints = [...newPolygonPoints, { x, y }];
     }
@@ -577,7 +587,7 @@
                 style="left: {hoverThumbnail.x - 72}px; top: {hoverThumbnail.y}px;"
             >
                 <img 
-                    src="/api/v1/recordings/vod/thumbnail/{hoverThumbnail.id}" 
+                    src="/api/v1/recordings/vod/thumbnail/{hoverThumbnail.id}{apiToken ? `?token=${apiToken}` : ''}" 
                     alt="Preview" 
                     class="w-full aspect-video object-cover rounded-md bg-black"
                 />

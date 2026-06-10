@@ -93,6 +93,13 @@
     });
     let activeDownloads: Record<string, { percent: number; bytesDownloaded: number; totalBytes: number; status: string; error?: string }> = $state({});
 
+    let toastMessage = $state('');
+    let toastType = $state<'info' | 'success' | 'warning' | 'error'>('info');
+    let showToast = $state(false);
+    let toastTimer: ReturnType<typeof setTimeout> | null = null;
+    let wsReconnectAttempts = $state(0);
+    let skillsLoadError = $state('');
+
     interface LogEntry {
         timestamp: string;
         source: 'stdout' | 'stderr';
@@ -114,7 +121,7 @@
 
     let isSurveillanceToggling = $state(false);
     const isSurveillanceActive = $derived(
-        (activeSkillStatus === 'ready' || activeSkillStatus === 'starting') || activeRecorders > 0
+        activeSkillStatus === 'ready' || activeSkillStatus === 'starting'
     );
 
     function togglePtzOverlay(cameraId: string) {
@@ -135,9 +142,7 @@
 
     let skillConfigValues: Record<string, Record<string, any>> = $state({});
     let isDeployingSkill: Record<string, boolean> = $state({});
-    let deployLogs: Record<string, string> = $state({});
     let deployProgress: Record<string, number> = $state({});
-    let executionLogs: Record<string, string> = $state({});
 
     onMount(async () => {
         await Promise.all([loadCameras(), loadRecorders()]);
@@ -149,9 +154,8 @@
         if (cameras.length === 0) return;
 
         const isDetectionActive = activeSkillStatus === 'ready' || activeSkillStatus === 'starting';
-        const isRecordingActive = recorders.some(r => r.state === 'recording');
 
-        if (isDetectionActive || isRecordingActive) {
+        if (isDetectionActive) {
             for (const camera of enabledCameras) {
                 if (camera.source === 'webcam') {
                     startWebcam(camera);
@@ -238,17 +242,22 @@
 
             const intervalMs = Math.max(200, Math.round(1000 / (camera.fps || 5)));
             let frameId = 0;
+            let lastAckTime = 0;
             
             const captureNext = () => {
+                // Always reschedule to keep the loop alive
+                webcamIntervals[camera.id] = setTimeout(captureNext, intervalMs) as any;
+
                 if (activeSkillStatus !== 'ready' || !ws || ws.readyState !== WebSocket.OPEN) return;
-                if (!video || video.readyState < video.HAVE_CURRENT_DATA) {
-                    webcamIntervals[camera.id] = setTimeout(captureNext, intervalMs) as any;
-                    return;
-                }
+                if (!video || video.readyState < video.HAVE_CURRENT_DATA) return;
 
                 if (waitingForFrameAck[camera.id]) {
-                    // Frame in flight, wait for ack
-                    return;
+                    // Clear stale ack after 3 seconds to prevent permanent block
+                    if (Date.now() - lastAckTime > 3000) {
+                        waitingForFrameAck[camera.id] = false;
+                    } else {
+                        return;
+                    }
                 }
 
                 const ctx = canvas.getContext('2d');
@@ -256,11 +265,11 @@
                 ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
                 
                 waitingForFrameAck[camera.id] = true;
+                lastAckTime = Date.now();
                 
                 canvas.toBlob((blob) => {
                     if (!blob) {
                         waitingForFrameAck[camera.id] = false;
-                        webcamIntervals[camera.id] = setTimeout(captureNext, intervalMs) as any;
                         return;
                     }
                     blob.arrayBuffer().then((imgBuffer) => {
@@ -281,12 +290,9 @@
                         payload.set(metaBytes, 4);
                         payload.set(new Uint8Array(imgBuffer), 4 + metaBytes.length);
                         
-                        ws.send(payload);
+                        ws?.send(payload);
                     }).catch(() => { waitingForFrameAck[camera.id] = false; });
                 }, 'image/jpeg', 0.72);
-                
-                // Still schedule the next check just in case, but ack handles primary loop
-                webcamIntervals[camera.id] = setTimeout(captureNext, intervalMs) as any;
             };
             
             captureNext();
@@ -336,7 +342,8 @@
             const offer = await pc.createOffer();
             await pc.setLocalDescription(offer);
 
-            const go2rtcUrl = `http://127.0.0.1:1984/api/webrtc?src=${encodeURIComponent(camera.id)}`;
+            const baseUrl = import.meta.env.VITE_GO2RTC_URL || `http://${window.location.hostname}:1984/api/webrtc`;
+            const go2rtcUrl = `${baseUrl}?src=${encodeURIComponent(camera.id)}`;
             const response = await fetch(go2rtcUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/sdp' },
@@ -508,21 +515,12 @@
         }
     }
 
-    function appendToExecutionLogs(sId: string, logMsg: string) {
-        if (!executionLogs[sId]) {
-            executionLogs[sId] = '';
-        }
-        executionLogs[sId] += logMsg + '\n';
-        const maxLength = 50000;
-        if (executionLogs[sId].length > maxLength) {
-            const sliceIndex = executionLogs[sId].length - maxLength;
-            const nextNewline = executionLogs[sId].indexOf('\n', sliceIndex);
-            if (nextNewline !== -1) {
-                executionLogs[sId] = executionLogs[sId].substring(nextNewline + 1);
-            } else {
-                executionLogs[sId] = executionLogs[sId].slice(-maxLength);
-            }
-        }
+    function triggerToast(msg: string, type: 'info' | 'success' | 'warning' | 'error' = 'info') {
+        toastMessage = msg;
+        toastType = type;
+        showToast = true;
+        if (toastTimer) clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => showToast = false, 4000);
     }
 
     function connectWS() {
@@ -544,6 +542,8 @@
 
             ws.onopen = () => {
                 wsStatus = 'connected';
+                wsReconnectAttempts = 0;
+                skillsLoadError = '';
                 ws?.send(JSON.stringify({ action: 'list_skills' }));
                 ws?.send(JSON.stringify({ action: 'get_settings' }));
                 ws?.send(JSON.stringify({ action: 'list_local_models' }));
@@ -553,15 +553,19 @@
                 wsStatus = 'disconnected';
                 activeSkillStatus = 'stopped';
                 if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
-                wsReconnectTimer = setTimeout(connectWS, 3000);
+                const backoff = Math.min(30000, 1000 * Math.pow(1.5, wsReconnectAttempts));
+                wsReconnectAttempts++;
+                wsReconnectTimer = setTimeout(connectWS, backoff);
             };
 
             ws.onmessage = async (event) => {
+                if (typeof event.data !== 'string') return;
                 try {
                     const data = JSON.parse(event.data);
 
                     if (data.event === 'skills_list') {
                         allSkills = data.skills || [];
+                        skillsLoadError = '';
                         allSkills.forEach(skill => {
                             if (skill.isDeploying) {
                                 isDeployingSkill[skill.id] = true;
@@ -586,9 +590,7 @@
                         const sId = data.skillId;
                         if (sId) {
                             isDeployingSkill[sId] = true;
-                            if (!deployLogs[sId]) deployLogs[sId] = '';
                             if (data.message) {
-                                deployLogs[sId] += data.message + '\n';
                                 const parsedEntry = parseLogLine(`[deploy] ${data.message}`);
                                 if (!structuredLogs[sId]) structuredLogs[sId] = [];
                                 structuredLogs[sId] = [...structuredLogs[sId], parsedEntry].slice(-400);
@@ -607,8 +609,8 @@
                         const sId = data.skillId;
                         if (sId) {
                             if (data.message) {
-                                appendToExecutionLogs(sId, data.message);
-                                const parsedEntry = parseLogLine(data.message);
+                                const prefix = data.source === 'stderr' ? '[stderr] ' : '';
+                                const parsedEntry = parseLogLine(prefix + data.message);
                                 if (!structuredLogs[sId]) structuredLogs[sId] = [];
                                 structuredLogs[sId] = [...structuredLogs[sId], parsedEntry].slice(-400);
                             }
@@ -618,7 +620,6 @@
                         const sId = data.skillId;
                         if (sId && data.message) {
                             const logMsg = `[Progress] [${data.stage || 'info'}] ${data.message}`;
-                            appendToExecutionLogs(sId, logMsg);
                             const parsedEntry = parseLogLine(logMsg);
                             if (!structuredLogs[sId]) structuredLogs[sId] = [];
                             structuredLogs[sId] = [...structuredLogs[sId], parsedEntry].slice(-400);
@@ -647,7 +648,6 @@
                             const avgTime = data.timings_ms?.total?.avg || 0;
                             const fpsVal = avgTime > 0 ? (1000 / avgTime).toFixed(1) : 'N/A';
                             const logMsg = `[Perf] Total Frames: ${data.total_frames} | FPS: ${fpsVal} (Inference: ${data.timings_ms?.inference?.avg || 0}ms)`;
-                            appendToExecutionLogs(sId, logMsg);
                             const parsedEntry = parseLogLine(logMsg);
                             if (!structuredLogs[sId]) structuredLogs[sId] = [];
                             structuredLogs[sId] = [...structuredLogs[sId], parsedEntry].slice(-400);
@@ -657,7 +657,6 @@
                         const sId = data.skillId;
                         if (sId && data.message) {
                             const logMsg = `[VLM] [${(data.alert_type || 'info').toUpperCase()}] ${data.message}`;
-                            appendToExecutionLogs(sId, logMsg);
                             const parsedEntry = parseLogLine(logMsg);
                             if (!structuredLogs[sId]) structuredLogs[sId] = [];
                             structuredLogs[sId] = [...structuredLogs[sId], parsedEntry].slice(-400);
@@ -667,10 +666,12 @@
                         const sId = data.skillId;
                         if (sId && data.message) {
                             const logMsg = `[Error] ${data.message}`;
-                            appendToExecutionLogs(sId, logMsg);
                             const parsedEntry = parseLogLine(logMsg);
                             if (!structuredLogs[sId]) structuredLogs[sId] = [];
                             structuredLogs[sId] = [...structuredLogs[sId], parsedEntry].slice(-400);
+                        }
+                        if (!sId && data.message) {
+                            skillsLoadError = data.message;
                         }
                     }
                     if (data.event === 'diagnostic_warning') {
@@ -687,8 +688,16 @@
                             };
                         }
                     }
+                    if (data.event === 'starting') {
+                        activeSkillStatus = 'starting';
+                    }
                     if (data.event === 'stopped') {
                         activeSkillStatus = 'stopped';
+                        if (data.skillId && data.message) {
+                            const parsedEntry = parseLogLine(`[stderr] ${data.message}`);
+                            if (!structuredLogs[data.skillId]) structuredLogs[data.skillId] = [];
+                            structuredLogs[data.skillId] = [...structuredLogs[data.skillId], parsedEntry].slice(-400);
+                        }
                     }
                     if (data.event === 'detections' && data.skillId === selectedSkillId) {
                         waitingForFrameAck[data.cameraId] = false;
@@ -718,7 +727,7 @@
                                 activeInference.vlm.modelId = null;
                             }
                         } else {
-                            alert(`Failed to delete model ${data.filename}`);
+                            triggerToast(`Failed to delete model ${data.filename}`, 'error');
                         }
                     }
                     if (data.event === 'download_progress') {
@@ -758,6 +767,9 @@
     function startInference() {
         if (!ws || ws.readyState !== WebSocket.OPEN) return;
         activeSkillStatus = 'starting';
+        const parsedEntry = parseLogLine('[Progress] Starting perception process…');
+        if (!structuredLogs[selectedSkillId]) structuredLogs[selectedSkillId] = [];
+        structuredLogs[selectedSkillId] = [...structuredLogs[selectedSkillId], parsedEntry].slice(-400);
         ws.send(JSON.stringify({ action: 'start_skill', skillId: selectedSkillId, config: skillConfigValues[selectedSkillId] || {} }));
     }
 
@@ -770,7 +782,7 @@
         if (isSurveillanceToggling) return;
         isSurveillanceToggling = true;
         try {
-            const isActive = (activeSkillStatus === 'ready' || activeSkillStatus === 'starting') || activeRecorders > 0;
+            const isActive = activeSkillStatus === 'ready' || activeSkillStatus === 'starting';
             if (isActive) {
                 stopInference();
                 await recorderAction('stop_all');
@@ -787,10 +799,9 @@
 
     function deploySkill(skillId: string) {
         if (!ws || ws.readyState !== WebSocket.OPEN) return;
-        deployLogs[skillId] = 'Deploy started...\n';
         deployProgress[skillId] = 5;
         isDeployingSkill[skillId] = true;
-        ws.send(JSON.stringify({ action: 'deploy_skill', skillId, config: skillConfigValues[skillId] || {} }));
+        ws?.send(JSON.stringify({ action: 'deploy_skill', skillId, config: skillConfigValues[skillId] || {} }));
     }
 
     function parseLogLine(rawLine: string): LogEntry {
@@ -877,7 +888,7 @@
 
     function downloadModel(repo: string, filename: string, isVlm: boolean) {
         if (!ws || ws.readyState !== WebSocket.OPEN) return;
-        ws.send(JSON.stringify({
+        ws?.send(JSON.stringify({
             action: 'download_model',
             repo,
             filename,
@@ -912,6 +923,20 @@
 </svelte:head>
 
 <div class="max-w-[1600px] mx-auto p-5 md:p-7 flex flex-col gap-5">
+    {#if showToast}
+        <div class="fixed bottom-6 right-6 z-[100] panel !p-0"
+            transition:fly={{ y: 16, duration: 200 }}>
+            <div class="flex items-center gap-3 px-4 py-3">
+                <span class="w-1.5 h-1.5 rounded-full status-pulse"
+                    class:bg-cyan={toastType === 'info'}
+                    class:bg-jade={toastType === 'success'}
+                    class:bg-gold={toastType === 'warning'}
+                    class:bg-crimson={toastType === 'error'}></span>
+                <span class="text-xs font-semibold text-foreground">{toastMessage}</span>
+            </div>
+        </div>
+    {/if}
+
     <!-- Header bar -->
     <header class="flex flex-col md:flex-row md:items-center justify-between gap-3 page-enter">
         <div>
@@ -1214,7 +1239,16 @@
                             {/if}
                         </div>
                     {:else}
-                        <p class="text-xs text-muted-foreground text-center p-8">Loading configurations…</p>
+                        <div class="text-xs text-muted-foreground text-center p-8">
+                            {#if skillsLoadError}
+                                <p class="text-crimson">{skillsLoadError}</p>
+                                <button class="btn btn-sm mt-3" onclick={() => ws?.send(JSON.stringify({ action: 'list_skills' }))}>Retry</button>
+                            {:else if wsStatus !== 'connected'}
+                                Connecting to perception service…
+                            {:else}
+                                Loading configurations…
+                            {/if}
+                        </div>
                     {/if}
                 </div>
             </section>
@@ -1247,7 +1281,7 @@
                                 >{label.toUpperCase()}</button>
                             {/each}
                         </div>
-                        <button class="btn-icon !w-7 !h-7" onclick={() => { if (structuredLogs[selectedSkillId]) structuredLogs[selectedSkillId] = []; if (executionLogs[selectedSkillId]) executionLogs[selectedSkillId] = ''; }} title="Clear">
+                        <button class="btn-icon !w-7 !h-7" onclick={() => { if (structuredLogs[selectedSkillId]) structuredLogs[selectedSkillId] = []; }} title="Clear">
                             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
                         </button>
                     </div>
@@ -1290,6 +1324,10 @@
                                 <span class="font-mono">&gt; Terminal ready · awaiting stdout stream…</span>
                             </div>
                         {/if}
+                    </div>
+                {:else}
+                    <div class="flex-1 bg-black/40 font-mono text-[10.5px] overflow-y-auto p-3 text-muted-foreground/50">
+                        &gt; {skillsLoadError || (wsStatus === 'connected' ? 'Loading skill catalog…' : 'Connecting to perception service…')}
                     </div>
                 {/if}
             </section>

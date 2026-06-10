@@ -115,6 +115,7 @@ pub fn validate_config(mut cfg: MqttConfig) -> Result<MqttConfig, String> {
 pub struct MqttManager {
     config: Arc<RwLock<MqttConfig>>,
     client: Arc<RwLock<Option<AsyncClient>>>,
+    loop_handle: Arc<RwLock<Option<tokio::task::JoinHandle<()>>>>,
     event_tx: broadcast::Sender<String>,
 }
 
@@ -123,6 +124,7 @@ impl MqttManager {
         Self {
             config: Arc::new(RwLock::new(MqttConfig::default())),
             client: Arc::new(RwLock::new(None)),
+            loop_handle: Arc::new(RwLock::new(None)),
             event_tx,
         }
     }
@@ -164,7 +166,7 @@ impl MqttManager {
         let event_tx = self.event_tx.clone();
         let loop_client = client.clone();
 
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             let mut backoff_ms = 500u64;
             loop {
                 match eventloop.poll().await {
@@ -201,11 +203,15 @@ impl MqttManager {
         });
 
         *self.client.write().await = Some(client);
+        *self.loop_handle.write().await = Some(handle);
         *self.config.write().await = config;
         Ok(())
     }
 
     pub async fn disconnect(&self) {
+        if let Some(handle) = self.loop_handle.write().await.take() {
+            handle.abort();
+        }
         let mut guard = self.client.write().await;
         if let Some(client) = guard.take() {
             let _ = client.disconnect().await;

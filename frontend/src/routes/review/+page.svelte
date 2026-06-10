@@ -294,8 +294,12 @@
         }
     }
 
-    function playTimeRange(startIso: string, endIso: string, cameraId: string, seekOffsetSec?: number) {
-        const src = `/api/v1/recordings/vod/index.m3u8?camera_id=${cameraId}&start_time=${startIso}&end_time=${endIso}`;
+    async function playTimeRange(startIso: string, endIso: string, cameraId: string, seekOffsetSec?: number) {
+        const token = await getApiToken();
+        let src = `/api/v1/recordings/vod/index.m3u8?camera_id=${cameraId}&start_time=${startIso}&end_time=${endIso}`;
+        if (token) {
+            src += `&token=${encodeURIComponent(token)}`;
+        }
         currentSrc = src;
         activeSegmentStartTime = new Date(startIso);
 
@@ -593,6 +597,32 @@
         } catch (e) { console.error('[Review] Exports fetch failed:', e); }
     }
 
+    async function downloadExport(jobId: string) {
+        const url = `/api/v1/exports/${jobId}/download`;
+        const token = await getApiToken();
+        const headers: Record<string, string> = {};
+        if (token) headers['X-Local-Token'] = token;
+        
+        try {
+            const res = await fetch(url, { headers });
+            if (res.ok) {
+                const blob = await res.blob();
+                const blobUrl = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = blobUrl;
+                a.download = `${jobId}.mp4`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(blobUrl);
+            } else {
+                triggerToast('Failed to download export.', 'error');
+            }
+        } catch (e) {
+            triggerToast('Download error', 'error');
+        }
+    }
+
     async function triggerCustomExport() {
         if (!selectedCameraId) { triggerToast('Select a camera first.', 'error'); return; }
         if (!exportStartTime || !exportEndTime) { triggerToast('Set start and end times.', 'error'); return; }
@@ -780,7 +810,7 @@
             <div class="flex items-center gap-2">
                 <span class="badge badge-iris">
                     <span class="w-1.5 h-1.5 rounded-full bg-iris status-pulse"></span>
-                    Review
+                    History
                 </span>
                 {#if selectedCamera}
                     <span class="text-[11px] text-muted-foreground font-mono flex items-center gap-1.5">
@@ -791,28 +821,6 @@
                     </span>
                 {/if}
             </div>
-
-            <div class="h-5 w-px bg-border"></div>
-
-            <!-- Camera select -->
-            <select bind:value={selectedCameraId} class="select !h-7 !text-[10px] !w-auto !min-w-[140px]">
-                {#each cameras as cam}
-                    <option value={cam.id}>{cam.name}</option>
-                {/each}
-                {#if cameras.length === 0}
-                    <option value="">No cameras</option>
-                {/if}
-            </select>
-
-            <!-- Date select -->
-            <select bind:value={selectedDate} class="select !h-7 !text-[10px] !w-auto !min-w-[130px]">
-                {#each availableDates as dt}
-                    <option value={dt}>{formatDateFriendly(dt + 'T00:00:00')}</option>
-                {/each}
-                {#if availableDates.length === 0}
-                    <option value={selectedDate}>{formatDateFriendly(selectedDate + 'T00:00:00')}</option>
-                {/if}
-            </select>
         </div>
 
         <div class="flex items-center gap-2">
@@ -846,6 +854,38 @@
 
     <!-- ═══════════════════ MAIN CONTENT ═══════════════════ -->
     <div class="flex-1 flex overflow-hidden relative">
+
+        <!-- DVR Sidebar -->
+        <div class="w-64 border-r border-border bg-card/40 flex flex-col shrink-0 overflow-y-auto">
+            <!-- Camera Tree -->
+            <div class="px-4 py-2 border-b border-border bg-card/60 flex items-center justify-between sticky top-0 z-10">
+                <span class="font-semibold text-[10px] text-muted-foreground uppercase tracking-wider">Device List</span>
+            </div>
+            <div class="flex-1 p-2 flex flex-col gap-1">
+                {#each cameras as cam}
+                    <button onclick={() => selectedCameraId = cam.id}
+                        class="text-left px-3 py-2 text-xs rounded border border-transparent hover:bg-card-hover {selectedCameraId === cam.id ? '!bg-cyan/10 !border-cyan/30 !text-cyan' : ''}">
+                        <div class="flex items-center gap-2">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                            {cam.name}
+                        </div>
+                    </button>
+                {/each}
+                {#if cameras.length === 0}
+                    <p class="text-xs text-muted-foreground p-3 text-center">No cameras available</p>
+                {/if}
+            </div>
+            
+            <!-- Calendar / Date Select -->
+            <div class="px-4 py-2 border-y border-border bg-card/60 flex items-center justify-between sticky top-0 z-10">
+                <span class="font-semibold text-[10px] text-muted-foreground uppercase tracking-wider">Playback Date</span>
+            </div>
+            <div class="p-3 bg-surface-1">
+                <input type="date" bind:value={selectedDate} class="w-full bg-background border border-border rounded text-xs p-2 text-foreground focus:border-cyan outline-none" />
+            </div>
+
+
+        </div>
 
         <!-- ─── Video player area ─── -->
         <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -1200,7 +1240,7 @@
                                     <span class="text-[10px] font-mono text-muted-foreground">{job.id.slice(0, 6)}</span>
                                     <span class="text-[10px] font-mono font-bold text-foreground uppercase">{job.status}</span>
                                     {#if job.status === 'completed'}
-                                        <a href="/api/v1/exports/{job.id}/download" download class="text-[10px] font-bold text-jade hover:text-jade/80">↓</a>
+                                        <button onclick={() => downloadExport(job.id)} class="text-[10px] font-bold text-jade hover:text-jade/80 cursor-pointer border-none bg-transparent p-0 m-0 leading-none">↓</button>
                                     {/if}
                                 </div>
                             {/each}

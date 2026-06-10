@@ -159,6 +159,12 @@ impl HuggingFaceService {
         download_id: &str,
         tx: &Sender<String>,
     ) -> Result<PathBuf, String> {
+        if !crate::server::path_safe::is_safe_component(filename)
+            || !filename.to_ascii_lowercase().ends_with(".gguf")
+        {
+            return Err("invalid model filename".to_string());
+        }
+
         let url = format!(
             "{}/{}/resolve/{}/{}",
             HF_RESOLVE_BASE,
@@ -178,23 +184,31 @@ impl HuggingFaceService {
         }
 
         let total_size = resp.content_length().unwrap_or(0);
-        let dest_path = dest_dir.join(filename);
-        if let Some(parent) = dest_path.parent() {
-            tokio::fs::create_dir_all(parent)
-                .await
-                .map_err(|e| format!("create model dir failed: {}", e))?;
-        }
-        let mut file = tokio::fs::File::create(&dest_path)
+        tokio::fs::create_dir_all(dest_dir)
+            .await
+            .map_err(|e| format!("create model dir failed: {}", e))?;
+        let dest_path = crate::server::path_safe::safe_join_under(dest_dir, filename)
+            .ok_or_else(|| "model filename escapes destination directory".to_string())?;
+
+        // Download to temp file first, then atomic rename
+        let tmp_path = dest_path.with_extension(format!(
+            "{}.tmp",
+            dest_path.extension().and_then(|e| e.to_str()).unwrap_or("download")
+        ));
+        let mut file = tokio::fs::File::create(&tmp_path)
             .await
             .map_err(|e| format!("create model file failed: {}", e))?;
 
         let mut downloaded: u64 = 0;
         let mut last_reported_percent: u32 = 0;
         let mut stream = resp.bytes_stream();
+        use sha1::{Sha1, Digest};
+        let mut sha1_hasher = Sha1::new();
 
         use tokio::io::AsyncWriteExt;
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.map_err(|e| format!("huggingface stream error: {}", e))?;
+            sha1_hasher.update(&chunk);
             file.write_all(&chunk)
                 .await
                 .map_err(|e| format!("file write failed: {}", e))?;
@@ -221,6 +235,20 @@ impl HuggingFaceService {
         file.flush()
             .await
             .map_err(|e| format!("file flush failed: {}", e))?;
+        drop(file);
+
+        // Log SHA1 hash for audit trail (HuggingFace uses SHA1 for LFS)
+        let computed_hash = format!("{:x}", sha1_hasher.finalize());
+        log::info!(
+            "[HuggingFace] Downloaded {} ({} bytes, sha1={})",
+            filename, downloaded, computed_hash
+        );
+
+        // Atomic rename from temp to final path
+        tokio::fs::rename(&tmp_path, &dest_path)
+            .await
+            .map_err(|e| format!("rename temp file failed: {}", e))?;
+
         Ok(dest_path)
     }
 }

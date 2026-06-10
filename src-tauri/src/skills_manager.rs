@@ -235,10 +235,10 @@ fn is_inside_polygon(p: (f64, f64), poly: &[[f64; 2]]) -> bool {
     let mut inside = false;
     let mut j = poly.len() - 1;
     for i in 0..poly.len() {
+        let diff = poly[j][1] - poly[i][1];
         if (poly[i][1] > p.1) != (poly[j][1] > p.1)
-            && (p.0
-                < (poly[j][0] - poly[i][0]) * (p.1 - poly[i][1]) / (poly[j][1] - poly[i][1])
-                    + poly[i][0])
+            && diff.abs() > f64::EPSILON
+            && (p.0 < (poly[j][0] - poly[i][0]) * (p.1 - poly[i][1]) / diff + poly[i][0])
         {
             inside = !inside;
         }
@@ -271,9 +271,14 @@ fn validate_event_snapshot(snapshot_path: Option<&str>) -> Option<String> {
     if !p.is_file() {
         return None;
     }
-    let header_ok = std::fs::read(p)
-        .ok()
-        .map(|b| b.len() >= 4 && b[0] == 0xFF && b[1] == 0xD8 && b[2] == 0xFF)
+    let mut buf = [0u8; 4];
+    let header_ok = std::fs::File::open(p)
+        .and_then(|mut f| {
+            use std::io::Read;
+            f.read_exact(&mut buf)?;
+            Ok(())
+        })
+        .map(|_| buf[0] == 0xFF && buf[1] == 0xD8 && buf[2] == 0xFF)
         .unwrap_or(false);
     if !header_ok {
         eprintln!(
@@ -297,6 +302,8 @@ pub struct SkillsManager {
     pub root_dir: PathBuf,
     pub tx: broadcast::Sender<String>,
     pub recording_manager: crate::recording_manager::RecordingManager,
+    // Cached skills catalog to avoid O(n) disk reads on every list_skills() call
+    cached_skills: RwLock<Option<(std::time::Instant, Value)>>,
 }
 
 impl SkillsManager {
@@ -317,9 +324,10 @@ impl SkillsManager {
             active_processes: Arc::new(RwLock::new(HashMap::new())),
             start_reservations: Arc::new(RwLock::new(HashSet::new())),
             deploy_reservations: Arc::new(RwLock::new(HashSet::new())),
-            root_dir,
+            root_dir: std::fs::canonicalize(&root_dir).unwrap_or(root_dir),
             tx,
             recording_manager,
+            cached_skills: RwLock::new(None),
         }
     }
 
@@ -329,6 +337,30 @@ impl SkillsManager {
         if !path.exists() {
             return Err("skills.json not found".into());
         }
+
+        // Check cache (valid for 5 seconds)
+        {
+            let cache = self.cached_skills.read().await;
+            if let Some((ts, ref cached)) = *cache {
+                if ts.elapsed() < std::time::Duration::from_secs(5) {
+                    // Return cached value but refresh running status
+                    let mut json = cached.clone();
+                    if let Some(skills_arr) = json["skills"].as_array_mut() {
+                        for skill in skills_arr {
+                            let skill_id = skill["id"].as_str().unwrap_or("").to_string();
+                            let is_running = {
+                                let map = self.active_processes.read().await;
+                                map.keys().any(|k| k.starts_with(&format!("{}:", skill_id)))
+                            };
+                            skill["isRunning"] = serde_json::json!(is_running);
+                            skill["status"] = serde_json::json!(if is_running { "ready" } else { "stopped" });
+                        }
+                    }
+                    return Ok(json);
+                }
+            }
+        }
+
         let content = tokio::fs::read_to_string(path).await?;
         let mut json: Value = serde_json::from_str(&content)?;
 
@@ -357,10 +389,41 @@ impl SkillsManager {
                 if !relative_path.is_empty() {
                     let skill_abs_path = self.root_dir.join(&relative_path);
                     if skill_abs_path.join("package.json").exists() || skill_abs_path.join("requirements.txt").exists() {
-                        is_installed = skill_abs_path.join(".deployed").exists();
+                        let has_deploy_marker = skill_abs_path.join(".deployed").exists();
+                        let is_windows = cfg!(target_os = "windows");
+                        let python_exe = if is_windows {
+                            skill_abs_path.join(".venv").join("Scripts").join("python.exe")
+                        } else {
+                            skill_abs_path.join(".venv").join("bin").join("python")
+                        };
+                        let has_venv_python = python_exe.exists();
+                        // Basic file-existence check
+                        is_installed = has_deploy_marker && has_venv_python;
+                        // Extra sanity: try importing the primary package to catch partial installs.
+                        // Only run if the venv python is present (cheap check first).
+                        if is_installed && skill_abs_path.join("requirements.txt").exists() {
+                            if let Ok(status) = tokio::process::Command::new(&python_exe)
+                                .arg("-c")
+                                .arg("import ultralytics")
+                                .current_dir(&skill_abs_path)
+                                .stdout(std::process::Stdio::null())
+                                .stderr(std::process::Stdio::null())
+                                .status()
+                                .await
+                            {
+                                if !status.success() {
+                                    is_installed = false;
+                                    println!(
+                                        "[SkillsManager] Skill '{}' failed package sanity check (ultralytics import failed). Re-deploy required.",
+                                        skill_id
+                                    );
+                                }
+                            }
+                        }
                     }
                 }
                 skill["isInstalled"] = serde_json::json!(is_installed);
+
 
                 // Try to load parameters from SKILL.md
                 let mut config_params = serde_json::json!([]);
@@ -385,6 +448,12 @@ impl SkillsManager {
                 }
                 skill["configParams"] = config_params;
             }
+        }
+
+        // Cache the result for 5 seconds
+        {
+            let mut cache = self.cached_skills.write().await;
+            *cache = Some((std::time::Instant::now(), json.clone()));
         }
 
         Ok(json)
@@ -480,17 +549,23 @@ impl SkillsManager {
             // time through and skip). The reservation prevents the
             // double-spawn race.
             {
-                let mut reserved = self.start_reservations.write().await;
                 let processes = self.active_processes.read().await;
                 if processes.contains_key(&active_key) {
-                    drop(processes);
-                    drop(reserved);
                     println!("Skill process {} is already running.", active_key);
                     continue;
                 }
+                drop(processes);
+
+                let mut reserved = self.start_reservations.write().await;
+                // Double-check after acquiring write lock
+                let processes = self.active_processes.read().await;
+                if processes.contains_key(&active_key) {
+                    println!("Skill process {} is already running.", active_key);
+                    continue;
+                }
+                drop(processes);
+
                 if !reserved.insert(active_key.clone()) {
-                    drop(processes);
-                    drop(reserved);
                     println!("Skill process {} is already being started.", active_key);
                     continue;
                 }
@@ -517,8 +592,12 @@ impl SkillsManager {
                 obj.insert("camera_id".to_string(), serde_json::json!(camera_id));
                 obj.insert("camera_name".to_string(), serde_json::json!(camera_name));
                 obj.insert("source".to_string(), camera["source"].clone());
-                obj.insert("confidence".to_string(), camera["confidence"].clone());
-                obj.insert("fps".to_string(), camera["fps"].clone());
+                if let Some(confidence) = camera.get("confidence").and_then(Value::as_f64) {
+                    obj.insert("confidence".to_string(), serde_json::json!(confidence));
+                }
+                if let Some(fps) = camera.get("fps").and_then(Value::as_f64) {
+                    obj.insert("fps".to_string(), serde_json::json!(fps));
+                }
                 obj.insert("url".to_string(), serde_json::json!(rtsp_url.clone()));
                 obj.insert("rtsp_url".to_string(), serde_json::json!(rtsp_url.clone()));
                 obj.insert("use_shm".to_string(), serde_json::json!(use_shm));
@@ -536,6 +615,7 @@ impl SkillsManager {
             };
 
             let child = Command::new(&python_cmd)
+                .kill_on_drop(true)
                 .arg(entry_script)
                 .current_dir(&skill_abs_path)
                 .env("PYTHONUNBUFFERED", "1")
@@ -626,16 +706,27 @@ impl SkillsManager {
                 let mut ffmpeg_cmd = {
                     let bundled_ffmpeg = self.root_dir.join(".data").join("bin").join("ffmpeg.exe");
                     if bundled_ffmpeg.exists() {
-                        Command::new(bundled_ffmpeg)
+                        let mut cmd = Command::new(bundled_ffmpeg);
+                        cmd.kill_on_drop(true);
+                        cmd
                     } else {
-                        Command::new("ffmpeg")
+                        let mut cmd = Command::new("ffmpeg");
+                        cmd.kill_on_drop(true);
+                        cmd
                     }
                 };
                 
+                // Calculate dynamic scale height from camera resolution
+                let source_w = camera.get("width").and_then(|v| v.as_u64()).unwrap_or(1920) as usize;
+                let source_h = camera.get("height").and_then(|v| v.as_u64()).unwrap_or(1080) as usize;
+                let motion_dw = 360usize;
+                let motion_dh = if source_w > 0 { (source_h * motion_dw) / source_w } else { 202 };
+
                 if rtsp_url_clone.starts_with("rtsp://") {
                     ffmpeg_cmd.args(&["-rtsp_transport", "tcp"]);
                 }
                 
+                let vf_filter = format!("scale={}:{},fps=5", motion_dw, motion_dh);
                 ffmpeg_cmd
                     .args(&[
                         "-fflags",
@@ -647,7 +738,7 @@ impl SkillsManager {
                         "-i",
                         &rtsp_url_clone,
                         "-vf",
-                        "scale=360:202,fps=5",
+                        &vf_filter,
                         "-f",
                         "rawvideo",
                         "-pix_fmt",
@@ -663,8 +754,8 @@ impl SkillsManager {
                     ffmpeg_child_opt = Some(ffmpeg_child_arc.clone());
 
                     tokio::spawn(async move {
-                        let dw = 360;
-                        let dh = 202;
+                        let dw = motion_dw;
+                        let dh = motion_dh;
                         let frame_size = dw * dh * 3;
 
                         let mut detector = if enable_motion_gating {
@@ -672,8 +763,8 @@ impl SkillsManager {
                                 motion_threshold,
                                 min_motion_area,
                                 motion_masks,
-                                1280,
-                                720,
+                                source_w,
+                                source_h,
                             ))
                         } else {
                             None
@@ -764,6 +855,8 @@ impl SkillsManager {
 
             // Process output lines
             tokio::spawn(async move {
+                let mut invalid_line_count = 0u32;
+                let mut last_warn = std::time::Instant::now();
                 while let Some(line) = rx_out.recv().await {
                     let trimmed = line.trim();
                     if trimmed.is_empty() {
@@ -771,6 +864,7 @@ impl SkillsManager {
                     }
 
                     if let Ok(mut parsed) = serde_json::from_str::<Value>(trimmed) {
+                        invalid_line_count = 0; // Reset on valid JSON
                         // Enriched payload for WebSocket broadcast
                         if let Some(obj) = parsed.as_object_mut() {
                             obj.insert("skillId".to_string(), serde_json::json!(skill_id_str));
@@ -823,13 +917,15 @@ impl SkillsManager {
                                     }
 
                                     // Write event to relational DB (SQLite)
-                                    let _ = recording_manager_clone.insert_event(
+                                    if let Err(e) = recording_manager_clone.insert_event(
                                         &camera_id_str,
                                         &msg,
                                         conf,
                                         snap_path.as_deref(),
                                         &alert_type,
-                                    );
+                                    ) {
+                                        eprintln!("[SkillsManager] Failed to insert threat event into DB: {}", e);
+                                    }
                                 }
                                 "detections" => {
                                     if let Some(objs) =
@@ -840,7 +936,7 @@ impl SkillsManager {
                                             let mut best_conf = 0.0;
                                             for o in objs {
                                                 let l = o
-                                                    .get("label")
+                                                    .get("class")
                                                     .and_then(|v| v.as_str())
                                                     .unwrap_or("")
                                                     .to_string();
@@ -872,13 +968,15 @@ impl SkillsManager {
                                             }
 
                                             // Write event to relational DB (SQLite)
-                                            let _ = recording_manager_clone.insert_event(
+                                            if let Err(e) = recording_manager_clone.insert_event(
                                                 &camera_id_str,
                                                 &best_label,
                                                 best_conf,
                                                 snap_path.as_deref(),
                                                 "info",
-                                            );
+                                            ) {
+                                                eprintln!("[SkillsManager] Failed to insert detection event into DB: {}", e);
+                                            }
                                         }
                                     }
                                 }
@@ -891,15 +989,32 @@ impl SkillsManager {
                             let _ = tx.send(event_str);
                         }
                     } else {
-                        // Forward raw stdout log as event
-                        let log_event = serde_json::json!({
-                            "event": "log",
-                            "skillId": skill_id_str,
-                            "cameraId": camera_id_str,
-                            "message": trimmed
-                        });
-                        if let Ok(event_str) = serde_json::to_string(&log_event) {
-                            let _ = tx.send(event_str);
+                        // Rate-limit non-JSON log lines to prevent WS DoS
+                        invalid_line_count += 1;
+                        if invalid_line_count > 50 && last_warn.elapsed() > std::time::Duration::from_secs(5) {
+                            eprintln!(
+                                "[SkillsManager] Skill {}/{}: {} consecutive non-JSON lines; throttling broadcast",
+                                skill_id_str, camera_id_str, invalid_line_count
+                            );
+                            last_warn = std::time::Instant::now();
+                        }
+                        if invalid_line_count <= 50 {
+                            let (source, message) =
+                                if let Some(message) = trimmed.strip_prefix("ERR: ") {
+                                    ("stderr", message)
+                                } else {
+                                    ("stdout", trimmed)
+                                };
+                            let log_event = serde_json::json!({
+                                "event": "log",
+                                "skillId": skill_id_str,
+                                "cameraId": camera_id_str,
+                                "source": source,
+                                "message": message
+                            });
+                            if let Ok(event_str) = serde_json::to_string(&log_event) {
+                                let _ = tx.send(event_str);
+                            }
                         }
                     }
                 }
@@ -914,7 +1029,8 @@ impl SkillsManager {
                 let stopped_event = serde_json::json!({
                     "event": "stopped",
                     "skillId": skill_id_str,
-                    "cameraId": camera_id_str
+                    "cameraId": camera_id_str,
+                    "message": "Perception process exited. Review the terminal output above for the cause."
                 });
                 if let Ok(msg_str) = serde_json::to_string(&stopped_event) {
                     let _ = tx.send(msg_str);
@@ -945,6 +1061,14 @@ impl SkillsManager {
 
             if let Some(active) = proc {
                 println!("[SkillsManager] Stopping AI process {}", key);
+
+                // Flush any buffered RAM segments before killing the process
+                if let Some(cam_id) = key.split(':').nth(1) {
+                    let rec_mgr = self.recording_manager.clone();
+                    let cam = cam_id.to_string();
+                    rec_mgr.flush_ram_buffer(&cam).await;
+                }
+
                 // Attempt graceful shutdown command
                 let stop_cmd = serde_json::json!({ "command": "stop" });
                 if let Ok(payload) = serde_json::to_string(&stop_cmd) {
@@ -1207,6 +1331,7 @@ impl SkillsManager {
         }
         }.await;
 
+        // Always release the reservation, even if the async block panicked
         deploy_reservations.write().await.remove(&skill_id_clone_for_drop);
         result
     }

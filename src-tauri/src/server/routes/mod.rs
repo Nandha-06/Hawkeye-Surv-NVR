@@ -7,3 +7,4 @@ pub mod identities;
 pub mod recordings;
 pub mod vod;
 pub mod exports;
+pub mod sherlock;

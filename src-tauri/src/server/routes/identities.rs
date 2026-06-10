@@ -383,4 +383,8 @@ pub struct RecordingsQuery {
     pub start_time: Option<String>,
 
     pub end_time: Option<String>,
+
+    pub limit: Option<usize>,
+
+    pub offset: Option<usize>,
 }

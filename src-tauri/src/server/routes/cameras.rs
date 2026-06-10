@@ -59,6 +59,19 @@ pub async fn save_cameras(
 
     }
 
+    let invalid_id = payload.as_array().unwrap().iter().any(|camera| {
+        camera
+            .get("id")
+            .and_then(Value::as_str)
+            .map(|id| !crate::server::path_safe::is_safe_component(id))
+            .unwrap_or(true)
+    });
+    if invalid_id {
+        return Json(serde_json::json!({
+            "error": "Every camera must have a non-empty filesystem-safe id"
+        }));
+    }
+
     match serde_json::to_string_pretty(&payload) {
 
         Ok(formatted) => {

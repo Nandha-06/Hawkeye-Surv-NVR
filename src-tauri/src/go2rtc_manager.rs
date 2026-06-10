@@ -80,7 +80,8 @@ streams: {}
 
     /// Spawn the go2rtc.exe binary as a sidecar process
     pub fn spawn(root_dir: &Path) -> Option<Child> {
-        let bin_path = root_dir.join(".data").join("bin").join("go2rtc.exe");
+        let bin_name = if cfg!(windows) { "go2rtc.exe" } else { "go2rtc" };
+        let bin_path = root_dir.join(".data").join("bin").join(bin_name);
         if !bin_path.exists() {
             eprintln!("[go2rtc] Binary not found at {:?}", bin_path);
             return None;

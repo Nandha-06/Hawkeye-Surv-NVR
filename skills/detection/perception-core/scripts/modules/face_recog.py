@@ -240,7 +240,8 @@ class FaceRecogModule(PerceptionModule):
                  min_person_width: int = 80,
                  min_confidence: float = 0.6,
                  reid_every_n: int = 5,
-                 det_threshold: float = 0.50):
+                 det_threshold: float = 0.50,
+                 nms_threshold: float = 0.4):
         self.scrfd_path = scrfd_path
         self.mfnet_path = mfnet_path
         self.min_person_width = min_person_width
@@ -251,6 +252,7 @@ class FaceRecogModule(PerceptionModule):
         self.detector: Optional[_SCRFDDetector] = None
         self.embedder: Optional[_MobileFaceNetEmbedder] = None
         self.load_ms: float = 0.0
+        self.nms_threshold = nms_threshold
 
     @property
     def name(self) -> str:
@@ -308,7 +310,7 @@ class FaceRecogModule(PerceptionModule):
         try:
             # Detect faces in the padded person crop
             face_detections = self.detector.detect(
-                person_crop, threshold=self.det_threshold
+                person_crop, threshold=self.det_threshold, nms_thresh=self.nms_threshold
             )
 
             if not face_detections:

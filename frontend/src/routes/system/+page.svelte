@@ -476,7 +476,7 @@
                     </div>
                 {:else}
                     <div class="flex flex-col gap-1">
-                        {#each processLogs as log, i (i)}
+                        {#each processLogs as log (log)}
                             <div class="flex items-start gap-2 leading-relaxed break-all text-zinc-300">
                                 <span class="text-jade/60 font-bold shrink-0">&gt;</span>
                                 <span class="text-zinc-300 flex-1 min-w-0">{log}</span>

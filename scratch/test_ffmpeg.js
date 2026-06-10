@@ -2,7 +2,7 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
-const filepath = path.join(__dirname, '..', '.data', 'recordings', 'webcam_local', 'rec_2026-05-31T18-15-40.924Z_bsep.webm');
+const filepath = path.join(__dirname, '..', 'test.webm');
 
 console.log('Testing FFmpeg on file:', filepath);
 console.log('File exists:', fs.existsSync(filepath));

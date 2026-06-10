@@ -79,9 +79,16 @@ pub async fn get_events(
 
     query.push_str(" ORDER BY timestamp DESC");
 
-    let limit = params.limit.unwrap_or(50);
+    let limit = params.limit.unwrap_or(50).clamp(1, 1_000);
+    let offset = params.offset.unwrap_or(0).min(1_000_000);
 
-    query.push_str(&format!(" LIMIT {}", limit));
+    query.push_str(" LIMIT ?");
+    args.push(Box::new(limit));
+
+    if params.offset.is_some() {
+        query.push_str(" OFFSET ?");
+        args.push(Box::new(offset));
+    }
 
     let mut stmt = match conn.prepare(&query) {
 

@@ -43,6 +43,8 @@ impl RecordingManager {
                 root_dir = parent;
             }
         }
+        // Canonicalize to avoid CWD-relative issues
+        let root_dir = std::fs::canonicalize(&root_dir).unwrap_or(root_dir);
 
         Self {
             active_recorders: Arc::new(RwLock::new(HashMap::new())),
@@ -56,8 +58,14 @@ impl RecordingManager {
     fn open_db(&self) -> Result<Connection, rusqlite::Error> {
         let db_path = self.root_dir.join(".data").join("hawkeye.db");
         // Ensure data dir exists
-        let _ = std::fs::create_dir_all(db_path.parent().unwrap());
-        Connection::open(db_path)
+        if let Some(parent) = db_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let conn = Connection::open(&db_path)?;
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
+        // Attempt WAL checkpoint to prevent corruption from unclean shutdowns
+        let _ = conn.execute_batch("PRAGMA wal_checkpoint(PASSIVE);");
+        Ok(conn)
     }
 
     /// Read camera config list from cameras.json
@@ -111,6 +119,11 @@ impl RecordingManager {
 
     /// Flush all segments currently in the RAM buffer for this camera to the permanent disk and index them
     pub async fn flush_ram_buffer(&self, camera_id: &str) {
+        if !crate::server::path_safe::is_safe_component(camera_id) {
+            log::warn!("[RecordingManager] rejected unsafe camera id: {}", camera_id);
+            return;
+        }
+
         let segments: Vec<BufferedSegment> = {
             let mut buffers = self.ram_buffers.write().await;
             if let Some(queue) = buffers.get_mut(camera_id) {
@@ -154,11 +167,24 @@ impl RecordingManager {
             let dest_path = recordings_dir.join(&seg.filename);
             let dest_path_str = dest_path.to_string_lossy().to_string();
 
+            // Only move the file if it still exists (prevents race with scan task)
+            if !seg.filepath.exists() {
+                println!(
+                    "[RecordingManager] Segment already moved, skipping: {}",
+                    seg.filename
+                );
+                continue;
+            }
+
             if let Err(e) = tokio::fs::rename(&seg.filepath, &dest_path).await {
                 eprintln!(
                     "[RecordingManager] Failed to rename RAM buffered segment: {}",
                     e
                 );
+                let mut buffers = self.ram_buffers.write().await;
+                if let Some(queue) = buffers.get_mut(camera_id) {
+                    queue.push_front(seg);
+                }
                 continue;
             }
 
@@ -172,29 +198,24 @@ impl RecordingManager {
             if let Ok(conn) = self.open_db() {
                 for (seg, dest_path_str) in written_segments {
                     let id = generate_random_id();
-                    let count: i32 = conn.query_row(
-                        "SELECT COUNT(*) FROM recordings WHERE camera_id = ?1 AND filepath = ?2",
-                        rusqlite::params![camera_id, dest_path_str],
-                        |r| r.get(0)
-                    ).unwrap_or(0);
-
-                    if count == 0 {
-                        let _ = conn.execute(
-                            "INSERT OR IGNORE INTO recordings (id, camera_id, start_time, end_time, filepath, type) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                            rusqlite::params![
-                                id,
-                                camera_id,
-                                seg.start_time.to_rfc3339(),
-                                seg.end_time.to_rfc3339(),
-                                dest_path_str,
-                                event_type
-                            ]
-                        );
-                        println!(
-                            "[RecordingManager] Flushed and indexed pre-roll segment: {}",
-                            seg.filename
-                        );
-                    }
+                    if let Err(e) = conn.execute(
+                        "INSERT OR IGNORE INTO recordings (id, camera_id, start_time, end_time, filepath, type) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                        rusqlite::params![
+                            id,
+                            camera_id,
+                            seg.start_time.to_rfc3339(),
+                            seg.end_time.to_rfc3339(),
+                            dest_path_str,
+                            event_type
+                        ]
+                    ) {
+                            eprintln!("[RecordingManager] Failed to index pre-roll segment in DB: {}", e);
+                        } else {
+                            println!(
+                                "[RecordingManager] Flushed and indexed pre-roll segment: {}",
+                                seg.filename
+                            );
+                        }
                 }
             }
         }
@@ -222,9 +243,7 @@ impl RecordingManager {
 
     /// Delete continuous recordings if storage usage hits 95%
     async fn run_storage_scavenger(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        use sysinfo::{Disks, System};
-        let mut sys = System::new_all();
-        sys.refresh_all();
+        use sysinfo::Disks;
         let disks = Disks::new_with_refreshed_list();
 
         let mut total_storage = 0u64;
@@ -244,18 +263,30 @@ impl RecordingManager {
         if used_percent >= 95.0 {
             println!("[StorageScavenger] Disk capacity at {:.1}%. Scavenging oldest continuous segments...", used_percent);
 
+            let mut disks_check = Disks::new_with_refreshed_list();
+            let mut loop_count = 0;
+            // Open a single DB connection for the entire scavenger cycle
+            let mut conn = self.open_db()?;
             // Loop deletion in chunks of 5 files until storage is below 90% or no continuous segments remain
             loop {
-                let mut sys_check = System::new_all();
-                sys_check.refresh_all();
-                let disks_check = Disks::new_with_refreshed_list();
+                loop_count += 1;
+                if loop_count > 100 {
+                    println!("[StorageScavenger] Max iterations reached (100). Aborting scavenger to prevent infinite loop.");
+                    break;
+                }
+                
+                disks_check.refresh_list();
                 let mut avail_check = 0u64;
                 for d in &disks_check {
                     avail_check += d.available_space();
                 }
 
                 let current_used_pct =
-                    ((total_storage - avail_check) as f64 / total_storage as f64) * 100.0;
+                    if total_storage > avail_check {
+                        ((total_storage - avail_check) as f64 / total_storage as f64) * 100.0
+                    } else {
+                        0.0
+                    };
                 if current_used_pct < 90.0 {
                     println!(
                         "[StorageScavenger] Space recovered. Disk usage now at {:.1}%",
@@ -265,7 +296,6 @@ impl RecordingManager {
                 }
 
                 let to_delete: Vec<(String, String)> = {
-                    let conn = self.open_db()?;
                     let mut stmt = conn.prepare(
                         "SELECT id, filepath FROM recordings WHERE type = 'continuous' ORDER BY start_time ASC LIMIT 5"
                     )?;
@@ -288,14 +318,18 @@ impl RecordingManager {
                 }
 
                 {
-                    let conn = self.open_db()?;
+                    let tx = conn.transaction()?;
                     for (id, filepath) in to_delete {
-                        let _ = conn.execute(
+                        if let Err(e) = tx.execute(
                             "DELETE FROM recordings WHERE id = ?1",
                             rusqlite::params![id],
-                        );
-                        println!("[StorageScavenger] Deleted segment from disk: {}", filepath);
+                        ) {
+                            eprintln!("[StorageScavenger] Failed to delete DB record for {}: {}", filepath, e);
+                        } else {
+                            println!("[StorageScavenger] Deleted segment from disk: {}", filepath);
+                        }
                     }
+                    tx.commit()?;
                 }
             }
         }
@@ -352,14 +386,17 @@ impl RecordingManager {
         {
             let conn = self.open_db()?;
             for (id, filepath) in to_delete {
-                let _ = conn.execute(
+                if let Err(e) = conn.execute(
                     "DELETE FROM recordings WHERE id = ?1",
                     rusqlite::params![id],
-                );
-                println!(
-                    "[SmartRetention] Expired {} segment purged: {}",
-                    rec_type, filepath
-                );
+                ) {
+                    eprintln!("[SmartRetention] Failed to delete expired DB record for {}: {}", filepath, e);
+                } else {
+                    println!(
+                        "[SmartRetention] Expired {} segment purged: {}",
+                        rec_type, filepath
+                    );
+                }
             }
         }
 
@@ -378,6 +415,7 @@ impl RecordingManager {
 
             // Optimized key-frame-only extraction: seek instantly to start, skip non-keyframes, and exit
             let mut cmd = Command::new("ffmpeg");
+            cmd.kill_on_drop(true);
             cmd.arg("-y")
                 .arg("-skip_frame")
                 .arg("nokey")
@@ -421,6 +459,10 @@ impl RecordingManager {
         &self,
         camera_id: &str,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        if !crate::server::path_safe::is_safe_component(camera_id) {
+            return Err(format!("Invalid camera id '{}'", camera_id).into());
+        }
+
         let cameras = self.load_cameras().await?;
         let camera = cameras
             .iter()
@@ -459,17 +501,144 @@ impl RecordingManager {
         let url_opt = camera["url"].as_str().or(camera["detect_url"].as_str());
 
         if source == "webcam" && url_opt.is_none() {
-            // Passive browser-recorded webcam mode (no local FFmpeg process required)
+            // No URL provided for webcam — spawn a local FFmpeg capture using
+            // the platform-native input device (dshow on Windows, v4l2 on Linux,
+            // avfoundation on macOS) with device index 0.
+            let input_format = if std::env::consts::OS == "windows" {
+                "dshow"
+            } else if std::env::consts::OS == "linux" {
+                "v4l2"
+            } else {
+                "avfoundation"
+            };
+            let webcam_device = if std::env::consts::OS == "windows" {
+                // dshow device string; index 0 opens the first available webcam.
+                // The camera config may optionally carry a "webcam_index" integer.
+                let idx = camera
+                    .get("webcam_index")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                format!("video={}", idx)
+            } else if std::env::consts::OS == "linux" {
+                let idx = camera
+                    .get("webcam_index")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                format!("/dev/video{}", idx)
+            } else {
+                // avfoundation: use device index as string
+                let idx = camera
+                    .get("webcam_index")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                format!("{}", idx)
+            };
+            // Override url_opt so the rest of the FFmpeg path is reused below.
+            // We do this by constructing local variables and jumping past the
+            // "webcam with no url" early-return.
+            println!(
+                "[RecordingManager] Webcam '{}' has no URL — using local FFmpeg {} capture (device: {})",
+                camera_id, input_format, webcam_device
+            );
+            // Create RAM buffer directory
+            let ram_buffer_dir = self
+                .root_dir
+                .join(".temp")
+                .join("ram_buffer")
+                .join(camera_id);
+            if ram_buffer_dir.exists() {
+                if let Ok(entries) = std::fs::read_dir(&ram_buffer_dir) {
+                    for entry in entries.flatten() {
+                        let name = entry.file_name();
+                        let name_str = name.to_string_lossy();
+                        if name_str.starts_with("segment_") && name_str.ends_with(".mp4") {
+                            let _ = std::fs::remove_file(entry.path());
+                        }
+                    }
+                }
+            }
+            tokio::fs::create_dir_all(&ram_buffer_dir).await?;
+
+            let output_pattern = ram_buffer_dir.join("segment_%Y-%m-%dT%H-%M-%S.mp4");
+            let args = vec![
+                "-hide_banner".to_string(),
+                "-loglevel".to_string(),
+                "warning".to_string(),
+                "-f".to_string(),
+                input_format.to_string(),
+                "-i".to_string(),
+                webcam_device,
+                "-map".to_string(),
+                "0:v:0".to_string(),
+                "-c:v".to_string(),
+                "libx264".to_string(),
+                "-preset".to_string(),
+                "ultrafast".to_string(),
+                "-tune".to_string(),
+                "zerolatency".to_string(),
+                "-f".to_string(),
+                "segment".to_string(),
+                "-segment_time".to_string(),
+                "5".to_string(),
+                "-reset_timestamps".to_string(),
+                "1".to_string(),
+                "-strftime".to_string(),
+                "1".to_string(),
+                "-segment_format".to_string(),
+                "mp4".to_string(),
+                "-movflags".to_string(),
+                "empty_moov+frag_keyframe+default_base_moof".to_string(),
+                output_pattern.to_string_lossy().to_string(),
+            ];
+
+            println!(
+                "[RecordingManager] Launching local FFmpeg webcam recorder for {}: ffmpeg {:?}",
+                camera_id, args
+            );
+
+            let child = match Command::new("ffmpeg")
+                .kill_on_drop(true)
+                .args(&args)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+            {
+                Ok(c) => c,
+                Err(e) => {
+                    self.active_recorders.write().await.remove(camera_id);
+                    return Err(Box::new(e));
+                }
+            };
+
+            // Reuse the same scan task path as RTSP/URL sources.
+            let camera_id_str = camera_id.to_string();
+            let ram_buffer_dir_clone = ram_buffer_dir.clone();
+            let root_dir_clone = self.root_dir.clone();
+            let ram_buffers_clone = self.ram_buffers.clone();
+            let active_events_clone = self.active_events.clone();
+            let this_clone = self.clone();
+            let scan_task = spawn_scan_task(
+                camera_id_str,
+                ram_buffer_dir_clone,
+                root_dir_clone,
+                ram_buffers_clone,
+                active_events_clone,
+                this_clone,
+            );
+
             let recorder = ActiveRecorder {
                 camera_id: camera_id.to_string(),
-                child: None,
-                scan_task: None,
+                child: Some(child),
+                scan_task: Some(scan_task),
             };
             self.active_recorders
                 .write()
                 .await
                 .insert(camera_id.to_string(), recorder);
-            println!("[RecordingManager] Browser webcam '{}' registered as active recorder (passive mode)", camera_id);
+            println!(
+                "[RecordingManager] Webcam '{}' recorder started (local FFmpeg capture)",
+                camera_id
+            );
             return Ok(());
         }
 
@@ -481,6 +650,24 @@ impl RecordingManager {
             .join(".temp")
             .join("ram_buffer")
             .join(camera_id);
+        
+        // Clean up orphaned segments from previous crash
+        if ram_buffer_dir.exists() {
+            if let Ok(entries) = std::fs::read_dir(&ram_buffer_dir) {
+                for entry in entries.flatten() {
+                    let name = entry.file_name();
+                    let name_str = name.to_string_lossy();
+                    if name_str.starts_with("segment_") && name_str.ends_with(".mp4") {
+                        let _ = std::fs::remove_file(entry.path());
+                        println!(
+                            "[RecordingManager] Cleaned up orphaned RAM segment: {}",
+                            name_str
+                        );
+                    }
+                }
+            }
+        }
+        
         tokio::fs::create_dir_all(&ram_buffer_dir).await?;
 
         // 1. Build FFmpeg command args to write to RAM buffer with low latency options
@@ -498,15 +685,24 @@ impl RecordingManager {
                 url.to_string(),
             ]
         } else {
+            let format = if std::env::consts::OS == "windows" {
+                "dshow"
+            } else if std::env::consts::OS == "linux" {
+                "v4l2"
+            } else if std::env::consts::OS == "macos" {
+                "avfoundation"
+            } else {
+                "avfoundation"
+            };
             vec![
                 "-f".to_string(),
-                "dshow".to_string(),
+                format.to_string(),
                 "-i".to_string(),
                 url.to_string(),
             ]
         };
 
-        let output_pattern = ram_buffer_dir.join("segment_%Y-%m-%dT%H-%M-%S.ts");
+        let output_pattern = ram_buffer_dir.join("segment_%Y-%m-%dT%H-%M-%S.mp4");
 
         let mut args = vec![
             "-hide_banner".to_string(),
@@ -550,6 +746,10 @@ impl RecordingManager {
             "1".to_string(),
             "-strftime".to_string(),
             "1".to_string(),
+            "-segment_format".to_string(),
+            "mp4".to_string(),
+            "-movflags".to_string(),
+            "empty_moov+frag_keyframe+default_base_moof".to_string(),
             output_pattern.to_string_lossy().to_string(),
         ]);
 
@@ -560,6 +760,7 @@ impl RecordingManager {
 
         // 2. Spawn the FFmpeg process. If spawn fails, release the slot.
         let child = match Command::new("ffmpeg")
+            .kill_on_drop(true)
             .args(&args)
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
@@ -581,179 +782,14 @@ impl RecordingManager {
         let active_events_clone = self.active_events.clone();
         let this_clone = self.clone();
 
-        let scan_task = tokio::spawn(async move {
-            use notify::{RecursiveMode, Watcher};
-
-            // Ensure directory exists so we can watch it
-            let _ = tokio::fs::create_dir_all(&ram_buffer_dir_clone).await;
-
-            let (tx, mut rx) = tokio::sync::mpsc::channel::<notify::Event>(100);
-            let mut watcher = match notify::recommended_watcher(
-                move |res: Result<notify::Event, notify::Error>| {
-                    if let Ok(event) = res {
-                        let _ = tx.blocking_send(event);
-                    }
-                },
-            ) {
-                Ok(w) => w,
-                Err(e) => {
-                    eprintln!(
-                        "[RecordingManager] Failed to create directory watcher: {}",
-                        e
-                    );
-                    return;
-                }
-            };
-
-            if let Err(e) = watcher.watch(&ram_buffer_dir_clone, RecursiveMode::NonRecursive) {
-                eprintln!("[RecordingManager] Failed to watch directory: {}", e);
-                return;
-            }
-
-            println!(
-                "[RecordingManager] Started kernel event watcher for: {:?}",
-                ram_buffer_dir_clone
-            );
-
-            while let Some(event) = rx.recv().await {
-                for filepath in event.paths {
-                    let filename = match filepath.file_name() {
-                        Some(name) => name.to_string_lossy().to_string(),
-                        None => continue,
-                    };
-
-                    // Check if it's a segmented video file
-                    if !filename.starts_with("segment_") || !filename.ends_with(".ts") {
-                        continue;
-                    }
-
-                    // Check if file is ready (closed by writer)
-                    let is_ready = {
-                        #[cfg(target_os = "linux")]
-                        {
-                            matches!(
-                                event.kind,
-                                notify::EventKind::Access(notify::event::AccessKind::Close(
-                                    notify::event::AccessMode::Write
-                                ))
-                            )
-                        }
-                        #[cfg(not(target_os = "linux"))]
-                        {
-                            // On Windows/macOS, check if we can open the file with write access (implies no exclusive locks)
-                            std::fs::OpenOptions::new()
-                                .write(true)
-                                .open(&filepath)
-                                .is_ok()
-                        }
-                    };
-
-                    if is_ready {
-                        if let Ok(metadata) = std::fs::metadata(&filepath) {
-                            if metadata.len() > 0 {
-                                // Parse start time from filename
-                                if let Some(start_time) = parse_timestamp_from_filename(&filename) {
-                                    // End time = start time + 5 seconds
-                                    let end_time = start_time + chrono::Duration::seconds(5);
-
-                                    let seg = BufferedSegment {
-                                        filename: filename.clone(),
-                                        filepath: filepath.clone(),
-                                        start_time,
-                                        end_time,
-                                    };
-
-                                    // Check if an event is active for this camera (within last 10 seconds)
-                                    let is_event_active = {
-                                        let events = active_events_clone.read().await;
-                                        if let Some((last_time, _)) = events.get(&camera_id_str) {
-                                            last_time.elapsed() < std::time::Duration::from_secs(10)
-                                        } else {
-                                            false
-                                        }
-                                    };
-
-                                    if is_event_active {
-                                        // Flush any existing segments in the RAM buffer
-                                        this_clone.flush_ram_buffer(&camera_id_str).await;
-
-                                        // Get active event type
-                                        let event_type = {
-                                            let events = active_events_clone.read().await;
-                                            events
-                                                .get(&camera_id_str)
-                                                .map(|(_, t)| t.clone())
-                                                .unwrap_or_else(|| "motion".to_string())
-                                        };
-
-                                        // Write this segment directly to the permanent directory
-                                        let recordings_dir = root_dir_clone
-                                            .join(".data")
-                                            .join("recordings")
-                                            .join(&camera_id_str);
-                                        let _ = tokio::fs::create_dir_all(&recordings_dir).await;
-                                        let dest_path = recordings_dir.join(&filename);
-                                        let dest_path_str = dest_path.to_string_lossy().to_string();
-
-                                        if let Ok(_) =
-                                            tokio::fs::rename(&filepath, &dest_path).await
-                                        {
-                                            // Extract thumbnail
-                                            this_clone.extract_thumbnail(&dest_path);
-
-                                            // Index in SQLite database
-                                            if let Ok(conn) = Connection::open(
-                                                root_dir_clone.join(".data").join("hawkeye.db"),
-                                            ) {
-                                                let id = generate_random_id();
-                                                let _ = conn.execute(
-                                                    "INSERT OR IGNORE INTO recordings (id, camera_id, start_time, end_time, filepath, type) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                                                    rusqlite::params![
-                                                        id,
-                                                        camera_id_str,
-                                                        start_time.to_rfc3339(),
-                                                        end_time.to_rfc3339(),
-                                                        dest_path_str,
-                                                        event_type
-                                                    ]
-                                                );
-                                                println!(
-                                                    "[RecordingManager] Indexed event segment: {}",
-                                                    filename
-                                                );
-                                            }
-                                        }
-                                    } else {
-                                        // Push to RAM buffer
-                                        let mut buffers = ram_buffers_clone.write().await;
-                                        let queue = buffers
-                                            .entry(camera_id_str.clone())
-                                            .or_insert_with(VecDeque::new);
-                                        queue.push_back(seg);
-
-                                        // Keep at most 3 segments (15 seconds) of pre-roll cache on disk
-                                        if queue.len() > 3 {
-                                            if let Some(old_seg) = queue.pop_front() {
-                                                let _ =
-                                                    tokio::fs::remove_file(&old_seg.filepath).await;
-                                                println!("[RecordingManager] Deleted old cached segment from disk: {}", old_seg.filename);
-                                            }
-                                        }
-                                        println!(
-                                            "[RecordingManager] Buffered segment on disk: {}",
-                                            filename
-                                        );
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Explicitly hold the watcher's ownership to prevent it from being dropped prematurely
-            let _watcher = watcher;
-        });
+        let scan_task = spawn_scan_task(
+            camera_id_str,
+            ram_buffer_dir_clone,
+            root_dir_clone,
+            ram_buffers_clone,
+            active_events_clone,
+            this_clone,
+        );
 
         // 4. Save active recorder
         let recorder = ActiveRecorder {
@@ -781,6 +817,10 @@ impl RecordingManager {
                 "[RecordingManager] Stopping continuous recorder for camera {}",
                 camera_id
             );
+            
+            // Flush any existing segments in the RAM buffer to disk before shutting down
+            self.flush_ram_buffer(camera_id).await;
+
             if let Some(task) = active.scan_task {
                 task.abort();
             }
@@ -817,6 +857,185 @@ impl RecordingManager {
             self.stop_recorder(&key).await;
         }
     }
+}
+
+// ── spawn_scan_task ──────────────────────────────────────────────────────────
+/// Spawn the background directory-watcher task that moves FFmpeg segments to
+/// permanent storage.
+///
+/// **Continuous recording model (Issue 3 fix)**
+/// Every 5-second segment written by FFmpeg is moved to the permanent
+/// recordings directory *unconditionally* as `type = "continuous"`.  When
+/// a detection event is active the type is overridden to the event type
+/// ("motion" or "vlm") so tiered retention can apply different rules.
+/// Pre-roll buffering is retained for event enrichment but is no longer the
+/// sole path to disk — segments always reach permanent storage.
+fn spawn_scan_task(
+    camera_id_str: String,
+    ram_buffer_dir: std::path::PathBuf,
+    root_dir: std::path::PathBuf,
+    ram_buffers: Arc<RwLock<HashMap<String, VecDeque<BufferedSegment>>>>,
+    active_events: Arc<RwLock<HashMap<String, (Instant, String)>>>,
+    this: RecordingManager,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        use notify::{RecursiveMode, Watcher};
+
+        let _ = tokio::fs::create_dir_all(&ram_buffer_dir).await;
+
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<notify::Event>(256);
+        let mut watcher = match notify::recommended_watcher(
+            move |res: Result<notify::Event, notify::Error>| {
+                if let Ok(event) = res {
+                    let _ = tx.blocking_send(event);
+                }
+            },
+        ) {
+            Ok(w) => w,
+            Err(e) => {
+                eprintln!("[RecordingManager] Failed to create directory watcher: {}", e);
+                return;
+            }
+        };
+
+        if let Err(e) = watcher.watch(&ram_buffer_dir, RecursiveMode::NonRecursive) {
+            eprintln!("[RecordingManager] Failed to watch directory: {}", e);
+            return;
+        }
+
+        println!(
+            "[RecordingManager] Started scan task for camera '{}' watching: {:?}",
+            camera_id_str, ram_buffer_dir
+        );
+
+        while let Some(event) = rx.recv().await {
+            for filepath in event.paths {
+                let filename = match filepath.file_name() {
+                    Some(name) => name.to_string_lossy().to_string(),
+                    None => continue,
+                };
+
+                if !filename.starts_with("segment_") || !filename.ends_with(".mp4") {
+                    continue;
+                }
+
+                // Confirm the file is closed (non-empty and not exclusively locked).
+                let is_ready = if let Ok(meta) = std::fs::metadata(&filepath) {
+                    if meta.len() == 0 {
+                        false
+                    } else {
+                        std::fs::OpenOptions::new()
+                            .write(true)
+                            .open(&filepath)
+                            .is_ok()
+                    }
+                } else {
+                    false
+                };
+
+                if !is_ready {
+                    continue;
+                }
+
+                let meta = match std::fs::metadata(&filepath) {
+                    Ok(m) if m.len() > 0 => m,
+                    _ => continue,
+                };
+                let _ = meta; // size already confirmed above
+
+                let start_time = match parse_timestamp_from_filename(&filename) {
+                    Some(t) => t,
+                    None => continue,
+                };
+                let end_time = start_time + chrono::Duration::seconds(5);
+
+                // Check if a detection event is active (overrides type tag).
+                let event_type = {
+                    let events = active_events.read().await;
+                    if let Some((last_time, t)) = events.get(&camera_id_str) {
+                        if last_time.elapsed() < std::time::Duration::from_secs(10) {
+                            t.clone()
+                        } else {
+                            "continuous".to_string()
+                        }
+                    } else {
+                        "continuous".to_string()
+                    }
+                };
+
+                // If a detection event is active, also flush the pre-roll buffer
+                // so those segments get the event tag instead of "continuous".
+                if event_type != "continuous" {
+                    this.flush_ram_buffer(&camera_id_str).await;
+                }
+
+                if !filepath.exists() {
+                    continue;
+                }
+
+                // ── Write segment to permanent storage unconditionally ──────
+                let recordings_dir = root_dir
+                    .join(".data")
+                    .join("recordings")
+                    .join(&camera_id_str);
+                let _ = tokio::fs::create_dir_all(&recordings_dir).await;
+                let dest_path = recordings_dir.join(&filename);
+                let dest_path_str = dest_path.to_string_lossy().to_string();
+
+                match tokio::fs::rename(&filepath, &dest_path).await {
+                    Ok(_) => {
+                        // Remove segment from RAM buffer tracking if present
+                        {
+                            let mut buffers = ram_buffers.write().await;
+                            if let Some(queue) = buffers.get_mut(&camera_id_str) {
+                                queue.retain(|s| s.filename != filename);
+                            }
+                        }
+
+                        this.extract_thumbnail(&dest_path);
+
+                        if let Ok(conn) = Connection::open(
+                            root_dir.join(".data").join("hawkeye.db"),
+                        ) {
+                            let id = generate_random_id();
+                            if let Err(e) = conn.execute(
+                                "INSERT OR IGNORE INTO recordings \
+                                 (id, camera_id, start_time, end_time, filepath, type) \
+                                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                                rusqlite::params![
+                                    id,
+                                    camera_id_str,
+                                    start_time.to_rfc3339(),
+                                    end_time.to_rfc3339(),
+                                    dest_path_str,
+                                    event_type
+                                ],
+                            ) {
+                                eprintln!(
+                                    "[RecordingManager] Failed to index segment in DB: {}",
+                                    e
+                                );
+                            } else {
+                                println!(
+                                    "[RecordingManager] Saved segment '{}' as type='{}' for camera '{}'",
+                                    filename, event_type, camera_id_str
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "[RecordingManager] Failed to move segment '{}' to permanent storage: {}",
+                            filename, e
+                        );
+                    }
+                }
+            }
+        }
+
+        // Hold watcher alive until the task exits.
+        let _watcher = watcher;
+    })
 }
 
 // Helpers
@@ -858,4 +1077,24 @@ fn generate_random_id() -> String {
     let mut bytes = [0u8; 16];
     rand::rngs::OsRng.fill_bytes(&mut bytes);
     hex::encode(bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    #[test]
+    fn test_parse_timestamp_from_filename() {
+        let filename = "segment_2026-06-08T02-51-06.mp4";
+        let parsed = parse_timestamp_from_filename(filename);
+        assert!(parsed.is_some(), "Expected Some(DateTime), got None");
+        let expected = chrono::Utc.with_ymd_and_hms(2026, 6, 8, 2, 51, 6).single().unwrap();
+        assert_eq!(parsed.unwrap(), expected);
+
+        // Test invalid extensions/formats
+        assert!(parse_timestamp_from_filename("segment_2026-06-08T02-51-06.ts").is_none());
+        assert!(parse_timestamp_from_filename("invalid_filename.mp4").is_none());
+        println!("Verification test passed successfully!");
+    }
 }

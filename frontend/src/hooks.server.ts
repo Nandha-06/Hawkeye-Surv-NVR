@@ -36,7 +36,8 @@ export const handle: Handle = async ({ event, resolve }) => {
 };
 
 export const handleFetch: HandleFetch = async ({ request, fetch }) => {
-    if (apiToken && request.url.startsWith('http://127.0.0.1:8080')) {
+    const port = process.env.HAWKEYE_PORT || '8080';
+    if (apiToken && request.url.startsWith(`http://127.0.0.1:${port}`)) {
         const headers = new Headers(request.headers);
         if (!headers.has('X-Local-Token')) {
             headers.set('X-Local-Token', apiToken);

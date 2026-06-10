@@ -73,6 +73,15 @@ pub async fn get_recordings(
 
     query.push_str(" ORDER BY start_time ASC");
 
+    if let Some(limit) = params.limit {
+        query.push_str(" LIMIT ?");
+        args.push(Box::new(limit.clamp(1, 1_000)));
+    }
+    if let Some(offset) = params.offset {
+        query.push_str(" OFFSET ?");
+        args.push(Box::new(offset.min(1_000_000)));
+    }
+
     let mut stmt = match conn.prepare(&query) {
 
         Ok(s) => s,
@@ -420,7 +429,7 @@ pub async fn upload_recording(
 
                 let insert_res = conn.execute(
 
-                    "INSERT OR IGNORE INTO recordings (id, camera_id, start_time, end_time, filepath, type) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    "INSERT INTO recordings (id, camera_id, start_time, end_time, filepath, type) VALUES (?1, ?2, ?3, ?4, ?5, ?6) ON CONFLICT(camera_id, filepath) DO UPDATE SET type = excluded.type, end_time = excluded.end_time",
 
                     rusqlite::params![
 

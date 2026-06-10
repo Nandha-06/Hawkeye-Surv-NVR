@@ -1,4 +1,5 @@
 import { browser } from '$app/environment';
+import { invoke } from '@tauri-apps/api/core';
 
 let cachedToken: string | null = null;
 let pendingFetch: Promise<string | null> | null = null;
@@ -10,12 +11,20 @@ export async function getApiToken(): Promise<string | null> {
 
     pendingFetch = (async () => {
         try {
+            // First try Tauri IPC if running inside Tauri desktop app
+            if ('__TAURI_INTERNALS__' in window) {
+                cachedToken = await invoke<string>('get_api_token');
+                return cachedToken;
+            }
+            
+            // Fallback to local dev API
             const resp = await fetch('/api/local-token', { credentials: 'include' });
             if (!resp.ok) return null;
             const data = await resp.json();
             cachedToken = typeof data?.token === 'string' ? data.token : null;
             return cachedToken;
-        } catch {
+        } catch (e) {
+            console.error('Failed to get API token:', e);
             return null;
         } finally {
             pendingFetch = null;

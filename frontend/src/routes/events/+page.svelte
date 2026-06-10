@@ -1,7 +1,9 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
     import { getApiToken, buildWsUrl } from '$lib/apiToken';
+    import { goto } from '$app/navigation';
     import { fly, fade } from 'svelte/transition';
+    import AuthImage from '$lib/components/AuthImage.svelte';
 
     interface CameraConfig {
         id: string;
@@ -43,6 +45,8 @@
     let toastMessage = $state('');
     let toastType = $state<'info' | 'success' | 'warning' | 'error'>('info');
     let showToast = $state(false);
+    let toastTimer: ReturnType<typeof setTimeout> | null = null;
+    let wsReconnectAttempts = $state(0);
 
     const filteredEvents = $derived.by(() => {
         return events
@@ -80,7 +84,8 @@
         toastMessage = msg;
         toastType = type;
         showToast = true;
-        setTimeout(() => {
+        if (toastTimer) clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => {
             showToast = false;
         }, 4000);
     }
@@ -123,6 +128,29 @@
         }
     }
 
+    async function downloadSnapshot(ev: CameraEvent) {
+        const url = `/api/v1/events/${ev.id}/snapshot`;
+        const token = await getApiToken();
+        
+        try {
+            const response = await fetch(token ? `${url}?token=${token}` : url);
+            if (response.ok) {
+                const blob = await response.blob();
+                const blobUrl = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = blobUrl;
+                a.download = `snapshot_${ev.camera_id}_${ev.id}.jpg`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(blobUrl);
+            }
+        } catch (e) {
+            console.error('Download failed', e);
+            triggerToast('Failed to download snapshot', 'error');
+        }
+    }
+
     function connectWS() {
         wsStatus = 'connecting';
         void (async () => {
@@ -138,12 +166,17 @@
                 return;
             }
 
-            ws.onopen = () => { wsStatus = 'connected'; };
+            ws.onopen = () => {
+                wsStatus = 'connected';
+                wsReconnectAttempts = 0;
+            };
 
             ws.onclose = () => {
                 wsStatus = 'disconnected';
                 if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
-                wsReconnectTimer = setTimeout(connectWS, 4000);
+                const backoff = Math.min(30000, 1000 * Math.pow(1.5, wsReconnectAttempts));
+                wsReconnectAttempts++;
+                wsReconnectTimer = setTimeout(connectWS, backoff);
             };
 
             ws.onmessage = (msg) => {
@@ -221,11 +254,17 @@
         }
     });
 
-    $effect(() => {
-        if (limit) {
-            loadData();
+
+
+    function handleEventClick(ev: CameraEvent) {
+        if (ev.snapshot_path) {
+            // Has a snapshot — open the modal to preview it
+            selectedSnapshotEvent = ev;
+        } else {
+            // No snapshot — navigate directly to History page for playback
+            goto(`/review?camera_id=${ev.camera_id}&timestamp=${ev.timestamp}&play=true`);
         }
-    });
+    }
 </script>
 
 <svelte:head>
@@ -312,7 +351,7 @@
             </div>
             <div class="flex flex-col gap-1.5">
                 <span class="section-eyebrow">Limit</span>
-                <select bind:value={limit} class="select min-w-[100px]">
+                <select bind:value={limit} onchange={() => loadData()} class="select min-w-[100px]">
                     <option value={50}>50</option>
                     <option value={100}>100</option>
                     <option value={200}>200</option>
@@ -404,17 +443,15 @@
                             {#each filteredEvents as ev (ev.id)}
                                 <tr
                                     class="hover:bg-card-hover transition-colors cursor-pointer group"
-                                    onclick={() => selectedSnapshotEvent = ev}
+                                    onclick={() => handleEventClick(ev)}
                                 >
                                     <td class="px-5 py-2.5">
                                         <div class="relative w-16 aspect-video rounded-lg overflow-hidden bg-black border border-border shrink-0">
-                                            {#if ev.snapshot_path && apiToken}
-                                                <img
-                                                    src={`/api/v1/events/${ev.id}/snapshot?token=${apiToken}`}
-                                                    alt="Thumbnail"
+                                            {#if ev.snapshot_path}
+                                                <AuthImage
+                                                    src={`/api/v1/events/${ev.id}/snapshot`}
+                                                    alt={ev.label}
                                                     class="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
-                                                    loading="lazy"
-                                                    onerror={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
                                                 />
                                             {:else}
                                                 <div class="w-full h-full flex items-center justify-center text-muted-foreground/30">
@@ -462,14 +499,13 @@
                                                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
                                             </a>
                                             {#if ev.snapshot_path}
-                                                <a
-                                                    href="/api/v1/events/{ev.id}/snapshot?token={apiToken}"
-                                                    download="snapshot_{ev.camera_id}_{ev.id}.jpg"
+                                                <button
+                                                    onclick={() => downloadSnapshot(ev)}
                                                     class="btn-icon !w-8 !h-8"
                                                     title="Download snapshot"
                                                 >
                                                     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
-                                                </a>
+                                                </button>
                                             {/if}
                                             <button
                                                 onclick={(e) => deleteEventItem(ev.id, e)}
@@ -492,18 +528,16 @@
                     <div
                         role="button"
                         tabindex="0"
-                        onclick={() => selectedSnapshotEvent = ev}
-                        onkeydown={(e) => e.key === 'Enter' && (selectedSnapshotEvent = ev)}
+                        onclick={() => handleEventClick(ev)}
+                        onkeydown={(e) => e.key === 'Enter' && handleEventClick(ev)}
                         class="panel !p-0 overflow-hidden group cursor-pointer hover:!border-cyan/40 transition-all"
                     >
                         <div class="relative aspect-video bg-black overflow-hidden">
-                            {#if ev.snapshot_path && apiToken}
-                                <img
-                                    src={`/api/v1/events/${ev.id}/snapshot?token=${apiToken}`}
-                                    alt="{ev.label} event capture"
+                            {#if ev.snapshot_path}
+                                <AuthImage
+                                    src={`/api/v1/events/${ev.id}/snapshot`}
+                                    alt={`${ev.label} event capture`}
                                     class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                                    loading="lazy"
-                                    onerror={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
                                 />
                             {:else}
                                 <div class="w-full h-full flex flex-col items-center justify-center text-muted-foreground/30 gap-1.5">
@@ -591,10 +625,10 @@
                 </div>
 
                 <div class="flex-1 bg-black overflow-hidden flex items-center justify-center p-4 min-h-[300px]">
-                    {#if selectedSnapshotEvent.snapshot_path && apiToken}
-                        <img
-                            src={`/api/v1/events/${selectedSnapshotEvent.id}/snapshot?token=${apiToken}`}
-                            alt="{selectedSnapshotEvent.label} capture"
+                    {#if selectedSnapshotEvent.snapshot_path}
+                        <AuthImage
+                            src={`/api/v1/events/${selectedSnapshotEvent.id}/snapshot`}
+                            alt={`${selectedSnapshotEvent.label} capture`}
                             class="max-w-full max-h-[60vh] object-contain rounded border border-border"
                         />
                     {:else}
@@ -624,10 +658,10 @@
                             Purge
                         </button>
                         {#if selectedSnapshotEvent.snapshot_path}
-                            <a href="/api/v1/events/{selectedSnapshotEvent.id}/snapshot?token={apiToken}" download="snapshot_{selectedSnapshotEvent.camera_id}_{selectedSnapshotEvent.id}.jpg" class="btn btn-sm">
+                            <button onclick={() => downloadSnapshot(selectedSnapshotEvent!)} class="btn btn-sm">
                                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
                                 Download
-                            </a>
+                            </button>
                         {/if}
                         <a href="/review?camera_id={selectedSnapshotEvent.camera_id}&timestamp={selectedSnapshotEvent.timestamp}&play=true" onclick={() => selectedSnapshotEvent = null} class="btn btn-primary btn-sm">
                             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polygon points="5 3 19 12 5 21 5 3"/></svg>

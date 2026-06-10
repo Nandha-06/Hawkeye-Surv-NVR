@@ -38,6 +38,7 @@ export interface SkillMetadata {
 	id: string;
 	name: string;
 	description: string;
+	isDeploying?: boolean;
 	version: string;
 	category: string;
 	path: string;

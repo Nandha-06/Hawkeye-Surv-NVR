@@ -2,6 +2,7 @@
     import { onMount, onDestroy } from 'svelte';
     import { getApiToken, buildWsUrl } from '$lib/apiToken';
     import { fly, fade } from 'svelte/transition';
+    import AuthImage from '$lib/components/AuthImage.svelte';
     import { browser } from '$app/environment';
 
     interface Identity {
@@ -416,7 +417,7 @@
                                 <div class="flex items-center gap-3 min-w-0">
                                     <div class="relative shrink-0">
                                         {#if p.image}
-                                            <img src="{p.image}&token={apiToken}" alt={p.name} class="w-12 h-12 rounded-xl border border-border object-cover" />
+                                            <AuthImage src={p.image} alt={p.name} class="w-12 h-12 rounded-xl border border-border object-cover" />
                                         {:else}
                                             <div class="w-12 h-12 rounded-xl border flex items-center justify-center font-display font-bold text-sm
                                                 {tone === 'iris' ? 'bg-iris/10 border-iris/20 text-iris' : ''}
@@ -547,7 +548,7 @@
             <div class="panel-body flex flex-col gap-4">
                 <div class="flex items-center gap-3 p-3.5 rounded-lg border border-border bg-surface-2/50">
                     {#if activeRenameProfile.image}
-                        <img src="{activeRenameProfile.image}&token={apiToken}" alt={activeRenameProfile.name} class="w-12 h-12 rounded-xl border border-border object-cover shrink-0" />
+                        <AuthImage src={activeRenameProfile.image} alt={activeRenameProfile.name} class="w-12 h-12 rounded-xl border border-border object-cover shrink-0" />
                     {:else}
                         <div class="w-12 h-12 rounded-xl bg-iris/10 border border-iris/20 text-iris flex items-center justify-center font-display font-bold text-sm shrink-0">
                             {getInitials(activeRenameProfile.name)}

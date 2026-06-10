@@ -6,6 +6,7 @@ use crate::server::state::ServerState;
 use axum::{body::{Body}, extract::{Path, State}, http::{StatusCode}, response::{IntoResponse, Response}, Json};
 
 use std::sync::Arc;
+use std::path::Path as FsPath;
 
 pub async fn get_exports(State(state): State<Arc<ServerState>>) -> impl IntoResponse {
 
@@ -168,11 +169,27 @@ pub async fn create_export(
 
         let mut concat_content = String::new();
 
-        for path in filepaths {
+        let recordings_dir = root.join(".data").join("recordings");
+        let safe_filepaths: Vec<String> = filepaths
+            .into_iter()
+            .filter(|path| {
+                let candidate = FsPath::new(path);
+                !path.chars().any(|c| c == '\r' || c == '\n' || c == '\'')
+                    && candidate.is_file()
+                    && crate::server::path_safe::ensure_under(candidate, &recordings_dir)
+            })
+            .collect();
+
+        if safe_filepaths.is_empty() {
+            fail_job(state_clone, &job_id, "No safe recording files found for export").await;
+            return;
+        }
+
+        for path in safe_filepaths {
 
             // Absolute path formatted for FFmpeg concat demuxer
-
-            let cleaned_path = path.replace("\\", "/");
+            // Escape single quotes to prevent path injection
+            let cleaned_path = path.replace("\\", "/").replace('\'', "'\\''");
 
             concat_content.push_str(&format!("file '{}'\n", cleaned_path));
 
@@ -274,9 +291,9 @@ pub async fn create_export(
 
         };
 
-        match child.wait().await {
+        match tokio::time::timeout(std::time::Duration::from_secs(300), child.wait()).await {
 
-            Ok(status) if status.success() => {
+            Ok(Ok(status)) if status.success() => {
 
                 let _ = tokio::fs::remove_file(&concat_txt_path).await;
 
@@ -296,11 +313,21 @@ pub async fn create_export(
 
             }
 
-            _ => {
+            Ok(_) => {
 
                 let _ = tokio::fs::remove_file(&concat_txt_path).await;
 
                 fail_job(state_clone, &job_id, "FFmpeg concatenation failed").await;
+
+            }
+
+            Err(_) => {
+                
+                let _ = child.kill().await;
+
+                let _ = tokio::fs::remove_file(&concat_txt_path).await;
+
+                fail_job(state_clone, &job_id, "FFmpeg concatenation timed out after 5 minutes").await;
 
             }
 
@@ -340,13 +367,14 @@ pub async fn download_export(
 
     let root = state.skills_manager.root_dir.clone();
 
-    let file_path = root
-
-        .join(".data")
-
-        .join("exports")
-
-        .join(format!("{}.mp4", id));
+    let exports_dir = root.join(".data").join("exports");
+    let filename = format!("{}.mp4", id);
+    let Some(file_path) = crate::server::path_safe::safe_join_under(&exports_dir, &filename) else {
+        return Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .body(Body::from("Invalid export id"))
+            .unwrap();
+    };
 
     if file_path.exists() {
 

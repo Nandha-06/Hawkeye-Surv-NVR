@@ -153,3 +153,27 @@ def event_published(topic: str) -> None:
 def event_ha_event_fired(event_type: str, **extra) -> None:
     """Emit a Home Assistant event fire confirmation."""
     emit({"event": "ha_event_fired", "eventType": event_type, **extra})
+
+
+def event_threat_analysis(
+    frame_id: int,
+    camera_id: str,
+    timestamp: str,
+    alert_type: str,
+    message: str,
+    snapshot_path: str = None,
+    **extra,
+) -> None:
+    """Emit a VLM threat analysis event."""
+    payload = {
+        "event": "threat_analysis",
+        "frame_id": frame_id,
+        "cameraId": camera_id,
+        "timestamp": timestamp,
+        "alert_type": alert_type,
+        "message": message,
+    }
+    if snapshot_path is not None:
+        payload["snapshot_path"] = snapshot_path
+    payload.update(extra)
+    emit(payload)

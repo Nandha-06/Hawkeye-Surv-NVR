@@ -54,6 +54,19 @@
         })();
     }
 
+    function toggleDevMode() {
+        if (!devMode.enabled) {
+            const pwd = prompt("Enter developer password to enable Dev Mode:");
+            if (pwd === "hawkeye-dev") {
+                devMode.enabled = true;
+            } else {
+                alert("Incorrect password");
+            }
+        } else {
+            devMode.enabled = false;
+        }
+    }
+
     onMount(() => {
         connectChatWS();
 
@@ -114,6 +127,7 @@
         { href: '/monitoring', label: 'Live Grid', desc: 'Real-time AI surveillance' },
         { href: '/events', label: 'Event Detections', desc: 'AI catches & alerts' },
         { href: '/review', label: 'Review Center', desc: 'Recordings & forensics' },
+        { href: '/sherlock', label: 'Sherlock Search', desc: 'Natural language video search' },
         { href: '/identities', label: 'Face Database', desc: 'Strangers & known identities' },
         { href: '/chat', label: 'Security Chat', desc: 'Conversational AI agent' },
         { href: '/cameras', label: 'Cameras', desc: 'Channels & region masks' },
@@ -195,7 +209,7 @@
 
                 <!-- Dev mode pill -->
                 <button
-                    onclick={() => devMode.enabled = !devMode.enabled}
+                    onclick={toggleDevMode}
                     class="hidden sm:flex items-center gap-1.5 h-8 px-2.5 rounded-lg border transition-all"
                     class:border-iris={devMode.enabled}
                     class:bg-iris={devMode.enabled}
@@ -267,7 +281,7 @@
                                     <span class="text-xs text-foreground">Developer mode</span>
                                     <button
                                         type="button"
-                                        onclick={() => devMode.enabled = !devMode.enabled}
+                                        onclick={toggleDevMode}
                                         aria-label="Toggle developer mode"
                                         aria-pressed={devMode.enabled}
                                         class="relative w-8 h-4 rounded-full transition-colors"

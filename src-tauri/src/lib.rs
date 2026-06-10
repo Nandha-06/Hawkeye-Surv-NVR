@@ -6,13 +6,28 @@ mod skills_manager;
 
 use tauri::Manager;
 
+#[tauri::command]
+fn get_api_token() -> Result<String, String> {
+    let mut data_dir = std::path::PathBuf::from(".data");
+    if !data_dir.exists() {
+        let parent_data = std::path::PathBuf::from("../.data");
+        if parent_data.exists() || std::path::PathBuf::from("../frontend").exists() {
+            data_dir = parent_data;
+        }
+    }
+    std::fs::read_to_string(data_dir.join(".local_api_token"))
+        .map(|s| s.trim().to_string())
+        .map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Initialize standard Tokio broadcast channel for real-time AI telemetry
-    let (tx, _) = tokio::sync::broadcast::channel::<String>(100);
+    let (tx, _) = tokio::sync::broadcast::channel::<String>(512);
     let server_tx = tx.clone();
 
     tauri::Builder::default()
+        .invoke_handler(tauri::generate_handler![get_api_token])
         .setup(move |app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -51,12 +66,13 @@ pub fn run() {
             let telemetry_tx = tx.clone();
             tauri::async_runtime::spawn(async move {
                 use sysinfo::{Disks, System};
-                let mut sys = System::new_all();
+                let mut sys = System::new();
 
                 loop {
                     tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
-                    sys.refresh_all();
+                    sys.refresh_cpu_usage();
+                    sys.refresh_memory();
 
                     let cpu_usage = sys.global_cpu_info().cpu_usage() as u32;
                     let total_mem = sys.total_memory();

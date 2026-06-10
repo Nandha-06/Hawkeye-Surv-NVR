@@ -179,7 +179,7 @@ class _OnnxCoreMLModel:
             pred_boxes = outputs[1][0]  # [300, 4]  cx, cy, w, h (normalized 0..1)
 
         # Sigmoid → class probabilities
-        probs = 1.0 / (1.0 + np.exp(-logits))
+        probs = 1.0 / (1.0 + np.exp(-np.clip(logits, -88.0, 88.0)))
 
         # Parse detections
         boxes = []

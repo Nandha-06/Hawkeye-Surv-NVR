@@ -103,7 +103,12 @@ class KalmanFilter:
         """Update state with new measurement. Returns corrected [cx, cy, w, h]."""
         y = measurement - self.H @ self.x
         S = self.H @ self.P @ self.H.T + self.R
-        K = self.P @ self.H.T @ np.linalg.inv(S)
+        # Use solve instead of inv for numerical stability
+        try:
+            K = np.linalg.solve(S, self.H @ self.P).T
+        except np.linalg.LinAlgError:
+            # Singular matrix — skip update, keep prediction
+            return self.x[:4].copy()
         self.x = self.x + K @ y
         I_KH = np.eye(8) - K @ self.H
         self.P = I_KH @ self.P
@@ -129,12 +134,15 @@ class Track:
     _TENTATIVE = "tentative"
     _CONFIRMED = "confirmed"
     _LOST = "lost"
+    _DELETED = "deleted"
 
     def __init__(self, track_id: int, bbox: np.ndarray, confidence: float = 0.0,
-                 cls: str = "person"):
+                 cls: str = "person", min_hits: int = 3, max_lost: int = 30):
         self.track_id: int = track_id
         self.confidence: float = confidence
         self.cls: str = cls
+        self.min_hits = min_hits
+        self.max_lost = max_lost
 
         # Kalman filter
         self.kalman = KalmanFilter()
@@ -170,7 +178,7 @@ class Track:
         self.time_since_update = 0
 
         # State transitions
-        if self.state == self._TENTATIVE and self.hits >= 3:
+        if self.state == self._TENTATIVE and self.hits >= self.min_hits:
             self.state = self._CONFIRMED
         elif self.state == self._LOST:
             self.state = self._CONFIRMED
@@ -185,12 +193,16 @@ class Track:
     def is_confirmed(self) -> bool:
         return self.state == self._CONFIRMED
 
+    def mark_deleted(self):
+        """Mark track as permanently deleted."""
+        self.state = self._DELETED
+
     @property
     def is_deleted(self) -> bool:
         """Should this track be removed from the tracker?"""
         if self.state == self._TENTATIVE and self.time_since_update > 2:
             return True
-        if self.state == self._LOST and self.time_since_update > 30:
+        if self.state == self._LOST and self.time_since_update > self.max_lost:
             return True
         return False
 
@@ -380,16 +392,21 @@ class ByteTracker:
                     bbox=det_bboxes[i],
                     confidence=det_confs[i],
                     cls=detections[i].get("class", "person"),
+                    min_hits=self.min_hits,
+                    max_lost=self.max_lost,
                 )
                 self._next_id += 1
                 self.tracks.append(new_track)
 
-        # 7. Prune deleted tracks
-        self.tracks = [t for t in self.tracks if not t.is_deleted]
+        # 7. Mark and prune deleted tracks
+        for t in self.tracks:
+            if t.is_deleted:
+                t.mark_deleted()
+        self.tracks = [t for t in self.tracks if t.state != t._DELETED]
 
         # 8. Return confirmed tracks
         return [t for t in self.tracks if t.is_confirmed]
 
     def get_all_tracks(self) -> list[Track]:
         """Return all non-deleted tracks (including tentative)."""
-        return [t for t in self.tracks if not t.is_deleted]
+        return [t for t in self.tracks if t.state != t._DELETED]

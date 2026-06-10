@@ -99,6 +99,20 @@
     let localModelsCount = $derived(localModels.length);
     let totalDiskUsed = $derived(localModels.reduce((acc, m) => acc + m.sizeBytes, 0));
 
+    let toastMessage = $state('');
+    let toastType = $state<'info' | 'success' | 'warning' | 'error'>('info');
+    let showToast = $state(false);
+    let toastTimer: ReturnType<typeof setTimeout> | null = null;
+    let wsReconnectAttempts = $state(0);
+
+    function triggerToast(msg: string, type: 'info' | 'success' | 'warning' | 'error' = 'info') {
+        toastMessage = msg;
+        toastType = type;
+        showToast = true;
+        if (toastTimer) clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => showToast = false, 4000);
+    }
+
     onMount(() => {
         connectWS();
     });
@@ -128,6 +142,7 @@
 
             ws.onopen = () => {
                 wsStatus = 'connected';
+                wsReconnectAttempts = 0;
                 ws?.send(JSON.stringify({ action: 'get_settings' }));
                 ws?.send(JSON.stringify({ action: 'list_skills' }));
             };
@@ -135,7 +150,9 @@
             ws.onclose = () => {
                 wsStatus = 'disconnected';
                 if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
-                wsReconnectTimer = setTimeout(connectWS, 3000);
+                const backoff = Math.min(30000, 1000 * Math.pow(1.5, wsReconnectAttempts));
+                wsReconnectAttempts++;
+                wsReconnectTimer = setTimeout(connectWS, backoff);
             };
 
             ws.onmessage = (event) => {
@@ -170,7 +187,7 @@
                         case 'hf_search_results':
                             hfSearching = false;
                             if (data.error) {
-                                alert(`Error searching HF: ${data.error}`);
+                                triggerToast(`Error searching HF: ${data.error}`, 'error');
                             } else {
                                 hfSearchResults = data.models;
                             }
@@ -179,7 +196,7 @@
                         case 'repo_files':
                             loadingFiles = false;
                             if (data.error) {
-                                alert(`Error fetching files: ${data.error}`);
+                                triggerToast(`Error fetching files: ${data.error}`, 'error');
                             } else {
                                 repoFiles = data.files;
                             }
@@ -210,7 +227,7 @@
                             if (data.success) {
                                 localModels = data.localModels;
                             } else {
-                                alert(`Failed to delete model ${data.filename}`);
+                                triggerToast(`Failed to delete model ${data.filename}`, 'error');
                             }
                             break;
 
@@ -257,8 +274,16 @@
                             skills = skills.map(s => s.id === data.skillId ? { ...s, isRunning: true, status: 'ready' } : s);
                             break;
 
+                        case 'starting':
+                            skills = skills.map(s => s.id === data.skillId ? { ...s, isRunning: true, status: 'starting' } : s);
+                            break;
+
                         case 'stopped':
                             skills = skills.map(s => s.id === data.skillId ? { ...s, isRunning: false, status: 'stopped' } : s);
+                            if (data.skillId && data.message) {
+                                if (!executionLogs[data.skillId]) executionLogs[data.skillId] = '';
+                                executionLogs[data.skillId] += `[stderr] ${data.message}\n`;
+                            }
                             break;
 
                         case 'log':
@@ -266,7 +291,10 @@
                                 const sId = data.skillId;
                                 if (sId) {
                                     if (!executionLogs[sId]) executionLogs[sId] = '';
-                                    if (data.message) executionLogs[sId] += data.message + '\n';
+                                    if (data.message) {
+                                        const prefix = data.source === 'stderr' ? '[stderr] ' : '';
+                                        executionLogs[sId] += prefix + data.message + '\n';
+                                    }
                                 }
                             }
                             break;
@@ -425,6 +453,19 @@
 </svelte:head>
 
 <div class="flex flex-col gap-6 w-full pb-32 page-enter">
+    {#if showToast}
+        <div class="fixed bottom-6 right-6 z-[100] panel !p-0"
+            transition:fly={{ y: 16, duration: 200 }}>
+            <div class="flex items-center gap-3 px-4 py-3">
+                <span class="w-1.5 h-1.5 rounded-full status-pulse"
+                    class:bg-cyan={toastType === 'info'}
+                    class:bg-jade={toastType === 'success'}
+                    class:bg-gold={toastType === 'warning'}
+                    class:bg-crimson={toastType === 'error'}></span>
+                <span class="text-xs font-semibold text-foreground">{toastMessage}</span>
+            </div>
+        </div>
+    {/if}
 
     <!-- Header -->
     <header class="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
